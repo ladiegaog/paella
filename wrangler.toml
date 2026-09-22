@@ -6,7 +6,7 @@ compatibility_date = "2026-09-01"
 # Cloudflare de la diega (ver README → "montarlo desde cero"). Mientras estén
 # vacíos, `npm run dev` funciona igual (usa D1/R2 locales en .wrangler/), pero
 # `npm run deploy` fallará con un mensaje claro.
-account_id = "REEMPLAZA_ACCOUNT_ID"
+account_id = "0144193e3b7468acc1edd338542c5e0b"
 
 # Dominio en producción: el Worker sirve el apex y el www como custom domains.
 # Cloudflare crea los registros DNS solo al desplegar, siempre que la zona
@@ -32,7 +32,7 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "paella-db"
-database_id = "REEMPLAZA_DATABASE_ID"
+database_id = "77c37c04-b567-4b98-9451-4084c2e5ed60"
 
 [[r2_buckets]]
 binding = "STORAGE"
