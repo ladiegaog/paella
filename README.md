@@ -89,6 +89,32 @@ Dos cosas que conviene no romper:
 La geometría del recorte vive aparte en `geom.js`, sin nada de DOM, y está
 cubierta por tests (`test/geom.test.js`).
 
+### Se instala en el móvil
+
+Es una PWA: desde el iPhone, *Compartir → Añadir a pantalla de inicio*; desde
+Android, Chrome ofrece instalarla. Se abre sin barra de navegador, con su icono,
+y arranca al instante porque el esqueleto (CSS y módulos) está en caché. Al
+mantener pulsado el icono aparece el atajo *subir una paella*, que entra por
+`/?subir=1` y abre el formulario desplegado.
+
+Sin conexión se ven las paellas ya visitadas, con sus fotos (las últimas 120).
+Publicar sí necesita red.
+
+El service worker (`public/sw.js`) tiene una regla de oro: **nunca servir HTML ni
+la API desde caché si hay red**. Un service worker descuidado sirve una versión
+vieja de la web para siempre y no hay manera de que nadie se entere. Por eso:
+
+| Qué | Cómo |
+|---|---|
+| HTML y `/api/*` | Red primero; la caché sólo si no hay red |
+| `/api/me` | Siempre red — servir una sesión vieja enseñaría el bloque de subir a quien ya no la tiene |
+| CSS, módulos, tipografías | Caché al momento y refresco por detrás |
+| `/r2/*` (las fotos) | Caché primero: sus nombres son aleatorios, nunca cambian |
+| Cualquier escritura | Ni se toca |
+
+**Al tocar cualquier archivo de `public/` hay que subir `VERSION` en `sw.js`.** Es
+lo que borra las cachés viejas y obliga a rellenarlas.
+
 ### La galería
 
 Aparte de la cenital, cada paella puede llevar hasta 20 fotos sueltas: la mesa,
@@ -128,12 +154,15 @@ npx tsc --noEmit  # comprobar los tipos
 
 ### Lo normal: hacer push
 
-Cada push a `main` despliega solo, con el workflow de
-`.github/workflows/deploy.yml`. Si los tests fallan, no despliega.
+El Worker está conectado al repo con **Workers Builds**, así que cada push a
+`main` despliega solo. No hace falta terminal, ni token, ni secrets de GitHub.
 
-Para que funcione, el repo necesita un secret llamado `CLOUDFLARE_API_TOKEN`
-(**Settings → Secrets and variables → Actions → New repository secret**). Hay
-que ser *admin* del repo para ponerlo.
+Se configura una vez desde el panel de Cloudflare: *Compute → Workers & Pages →
+`paella` → Settings → Build → Connect to Git*, eligiendo `ladiegaog/paella` y la
+rama `main`, con `npx wrangler deploy` como comando de despliegue.
+
+(Antes esto era un workflow de GitHub Actions. Se quitó porque poner el secret
+del repo pide permisos de admin sobre él, y Workers Builds no los necesita.)
 
 ### A mano, desde el ordenador de la diega
 
@@ -144,6 +173,13 @@ npx wrangler deploy
 
 `wrangler login` guarda la sesión en su ordenador, así que sólo hay que hacerlo
 la primera vez.
+
+### Si el cambio toca la base de datos
+
+**Primero la migración, después el despliegue.** Al revés, la web se cae: el
+código nuevo consulta columnas o tablas que todavía no existen. La migración
+también se puede ejecutar sin terminal, desde *Storage & Databases → D1 →
+`paella-db` → Console*, pegando el archivo de `migrations/`.
 
 ---
 
@@ -267,6 +303,9 @@ src/
   media.ts       claves de R2, tipos permitidos, tope de tamaño
 
 public/
+  manifest.json  para que se pueda instalar en el móvil
+  sw.js          el service worker: caché e instalación
+  icon-*.png     los iconos de la app, sacados del emoji 🥘
   index.html     la lista (y, con sesión, el bloque de subir)
   paella.html    la ficha de una paella (/p/7), para compartir el enlace
   subir.html     editar una paella (/subir?id=7)
@@ -285,6 +324,7 @@ public/
     utils.js       DOM, fechas, avisos
     auth.js        saber si hay sesión y enseñar/esconder lo que toca
     state.js       lo poco que comparten los módulos
+    pwa.js         registra el service worker
     page-*.js      el arranque de cada página
 
 schema.sql       las tablas (se aplica entero, es idempotente)
@@ -298,6 +338,11 @@ wrangler.toml    la configuración de Cloudflare
   pintarla. Guardarla sería duplicar el dato y arriesgarse a que mienta.
 - **La galería se sube al publicar, no al elegir la foto:** cancelar el
   formulario no deja nada tirado en R2.
+- **Los iconos salen del emoji del sistema**, renderizado a PNG. Apple Color
+  Emoji es una fuente de bitmaps y 160 px es el tamaño más grande que trae, así
+  que ese es el techo de nitidez del icono de 512.
+- **`apple-touch-icon` apunta a un PNG y no al SVG:** iOS ignora los SVG ahí y
+  pone una captura de la web como icono.
 - **`run_worker_first = true`** en `wrangler.toml` no es opcional: sin eso,
   Cloudflare sirve los archivos de `public/` sin pasar por el Worker, y `/subir`
   se vería sin haber entrado.

@@ -74,12 +74,15 @@ window.addEventListener('popstate', () => {
 (async () => {
   await checkAuth();
   if (isAuthed()) {
-    mountComposer({
+    const composer = mountComposer({
       root: $('#composer'),
       // Tras publicar, recargamos la lista desde arriba para que la paella
       // nueva aparezca en su sitio sin tener que refrescar la página.
       onGuardada: () => { aplicarFiltro(null); cargarHashtags(); },
     });
+    // El atajo de la app instalada (mantener pulsado el icono → "subir una
+    // paella") entra por /?subir=1 y abre el bloque ya desplegado.
+    if (new URLSearchParams(location.search).get('subir')) composer.abrir();
   }
   const inicial = tagDeLaUrl();
   feed.start(inicial);

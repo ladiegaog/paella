@@ -4,11 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <!-- iOS ignora los SVG aquí: sin un PNG, al añadirla a la pantalla de inicio
+       pone una captura de la web como icono en vez del logo. -->
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="paellas" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <link rel="stylesheet" href="/style.css" />
+  <script src="/js/pwa.js" defer></script>
   <title>editar la paella — paellas.party</title>
   <meta name="robots" content="noindex" />
-  <meta name="theme-color" content="#faf6f0" />
+  <!-- Dos theme-color: la barra del navegador y la de la app instalada siguen
+       al tema del sistema en vez de quedarse siempre en claro. -->
+  <meta name="theme-color" content="#faf6f0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#12100d" media="(prefers-color-scheme: dark)" />
 </head>
 <body>
   <header class="topbar">

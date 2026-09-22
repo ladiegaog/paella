@@ -292,6 +292,10 @@ export function mountComposer({ root, id = null, onGuardada }) {
     return salida;
   }
 
+  // Se devuelve para que quien monte el composer pueda desplegarlo (lo usa el
+  // atajo /?subir=1 de la app instalada).
+  const api_publica = { abrir: () => desplegar(true) };
+
   caja.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (enviando) return;
@@ -339,4 +343,6 @@ export function mountComposer({ root, id = null, onGuardada }) {
       publicar.textContent = textoBoton;
     }
   });
+
+  return api_publica;
 }
