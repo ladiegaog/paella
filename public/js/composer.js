@@ -1,0 +1,231 @@
+// ----- el bloque de subir una paella -----
+//
+// Vive arriba de la lista, como el composer de notas8: se abre la web ya
+// logueada y está ahí, sin navegar a ninguna parte. Plegado es una línea de
+// texto; desplegado, el recortador y los tres campos.
+//
+// El mismo módulo sirve para editar (/subir?id=N): con `id` arranca abierto,
+// carga la paella y guarda con PATCH. Cambiar la foto al editar es opcional —
+// si no elige archivo nuevo, se conserva la que había.
+
+import { el, formatPeso, toast } from './utils.js';
+import { api } from './api.js';
+import { LIMITS } from './state.js';
+import { createCropper } from './cropper.js';
+import { compressCrop } from './compressor.js';
+
+export function mountComposer({ root, id = null, onGuardada }) {
+  const editando = !!id;
+
+  // --- DOM ---
+  const abrir = el('button', {
+    class: 'composer-abrir',
+    text: '+ subir una paella',
+    attrs: { type: 'button', 'aria-expanded': 'false' },
+  });
+
+  const caja = el('form', { class: 'composer-caja' });
+  caja.noValidate = true;
+
+  const cropperRoot = el('div', { class: 'cropper' });
+  const cropper = createCropper(cropperRoot);
+
+  const inputFoto = el('input', {
+    // capture="environment" hace que el móvil abra directamente la cámara
+    // trasera, que es con la que se hace la foto cenital. En escritorio el
+    // atributo se ignora y sale el selector de archivos de siempre.
+    attrs: { type: 'file', accept: 'image/*', capture: 'environment', hidden: '' },
+  });
+  const btnFoto = el('button', { text: 'hacer o elegir la foto', attrs: { type: 'button' } });
+  const estado = el('p', { class: 'ayuda' });
+
+  const campos = el('div', { class: 'composer-campos' });
+  const titulo = el('input', {
+    attrs: { type: 'text', id: 'c-titulo', maxlength: '120', placeholder: 'título', required: '' },
+  });
+  const descripcion = el('textarea', {
+    attrs: { id: 'c-desc', maxlength: '2000', rows: '3', placeholder: 'qué llevaba, cómo salió, quién estaba…' },
+  });
+  const hashtags = el('input', {
+    attrs: { type: 'text', id: 'c-tags', placeholder: '#leña #marisco #domingo' },
+  });
+  const sugerencias = el('div', { class: 'sugerencias' });
+  const ayudaTags = el('p', {
+    class: 'ayuda',
+    text: 'separados por espacios · los que escribas en el título o la descripción también cuentan',
+  });
+  for (const [campo, etiqueta] of [[titulo, 'título'], [descripcion, 'descripción'], [hashtags, 'hashtags']]) {
+    const label = el('label', { class: 'visually-hidden', text: etiqueta, attrs: { for: campo.id } });
+    campos.append(label, campo);
+  }
+  campos.append(ayudaTags, sugerencias);
+
+  // El botón de la foto va junto al recortador, no en la barra de abajo: es
+  // el primer paso, no una acción de cierre.
+  const filaFoto = el('div', { class: 'composer-foto' });
+  filaFoto.append(btnFoto, estado);
+
+  const cancelar = el('button', { text: 'cancelar', attrs: { type: 'button' } });
+  const publicar = el('button', {
+    class: 'publicar',
+    text: editando ? 'guardar cambios' : 'publicar',
+    attrs: { type: 'submit' },
+  });
+  const bar = el('div', { class: 'composer-bar' });
+  bar.append(cancelar, publicar);
+
+  caja.append(cropperRoot, inputFoto, filaFoto, campos, bar);
+  root.append(abrir, caja);
+
+  // --- estado ---
+  let fotoElegida = false;
+  let enviando = false;
+
+  function desplegar(abierto) {
+    abrir.hidden = abierto;
+    caja.hidden = !abierto;
+    abrir.setAttribute('aria-expanded', String(abierto));
+    if (abierto) titulo.focus({ preventScroll: true });
+  }
+  desplegar(editando);
+
+  abrir.addEventListener('click', () => desplegar(true));
+  cancelar.addEventListener('click', () => {
+    if (editando) { location.href = '/'; return; }
+    limpiar();
+    desplegar(false);
+  });
+
+  function limpiar() {
+    titulo.value = '';
+    descripcion.value = '';
+    hashtags.value = '';
+    estado.textContent = '';
+    btnFoto.textContent = 'hacer o elegir la foto';
+    inputFoto.value = '';
+    fotoElegida = false;
+    cropper.reset();
+  }
+
+  // --- foto ---
+  btnFoto.addEventListener('click', () => inputFoto.click());
+
+  inputFoto.addEventListener('change', async () => {
+    const file = inputFoto.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return toast('eso no parece una foto', 'error');
+    estado.textContent = 'abriendo la foto…';
+    try {
+      await cropper.load(file);
+      fotoElegida = true;
+      estado.textContent = 'arrastra y pellizca para colocar la paella dentro del círculo';
+      btnFoto.textContent = 'cambiar la foto';
+    } catch (err) {
+      console.error(err);
+      estado.textContent = '';
+      toast('no se pudo abrir esa foto', 'error');
+    }
+  });
+
+  // --- hashtags que ya existen ---
+  (async () => {
+    const { ok, data } = await api('/api/hashtags');
+    if (!ok || !Array.isArray(data) || data.length === 0) return;
+    for (const { tag } of data.slice(0, 20)) {
+      const btn = el('button', { class: 'tag', text: `#${tag}`, attrs: { type: 'button' } });
+      btn.addEventListener('click', () => alternarTag(tag));
+      sugerencias.append(btn);
+    }
+  })();
+
+  // Añade o quita el tag del campo, respetando lo que ya haya escrito.
+  function alternarTag(tag) {
+    const actuales = hashtags.value
+      .split(/[\s,]+/)
+      .map((t) => t.replace(/^#/, '').toLowerCase())
+      .filter(Boolean);
+    const i = actuales.indexOf(tag);
+    if (i >= 0) actuales.splice(i, 1);
+    else actuales.push(tag);
+    hashtags.value = actuales.map((t) => `#${t}`).join(' ');
+  }
+
+  // --- cargar al editar ---
+  if (editando) {
+    (async () => {
+      const { ok, data } = await api(`/api/paellas/${id}`);
+      if (!ok) return toast('no se encontró esa paella', 'error');
+      titulo.value = data.titulo;
+      descripcion.value = data.descripcion || '';
+      hashtags.value = (data.hashtags || []).map((t) => `#${t}`).join(' ');
+      cropper.showExisting(`/r2/${data.r2_key}`);
+      btnFoto.textContent = 'cambiar la foto';
+      estado.textContent = 'si no cambias la foto, se queda la que hay';
+    })();
+  }
+
+  // --- guardar ---
+  async function subirFoto() {
+    const crop = cropper.getCrop();
+    const bitmap = cropper.getBitmap();
+    if (!crop || !bitmap) return null;
+
+    estado.textContent = 'preparando la foto…';
+    const { blob, side } = await compressCrop(bitmap, crop);
+    if (blob.size > LIMITS.image) throw new Error('la foto comprimida sigue siendo demasiado grande');
+
+    estado.textContent = `subiendo la foto (${formatPeso(blob.size)})…`;
+    const { ok, data } = await api('/api/upload', {
+      method: 'POST',
+      body: blob,
+      headers: { 'content-type': blob.type },
+    });
+    if (!ok) throw new Error(data?.error || 'no se pudo subir la foto');
+    return { key: data.key, size: side };
+  }
+
+  caja.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (enviando) return;
+    if (!titulo.value.trim()) return toast('ponle un título', 'error');
+    if (!editando && !fotoElegida) return toast('falta la foto de la paella', 'error');
+
+    enviando = true;
+    publicar.disabled = true;
+    const textoBoton = publicar.textContent;
+    publicar.textContent = 'guardando…';
+
+    try {
+      // Sólo se sube foto si hay una nueva recortada; al editar sin tocarla,
+      // esto devuelve null y el PATCH deja el r2_key anterior.
+      const foto = fotoElegida ? await subirFoto() : null;
+      const body = {
+        titulo: titulo.value,
+        descripcion: descripcion.value,
+        hashtags: hashtags.value,
+        ...(foto ? { r2_key: foto.key, size: foto.size } : {}),
+      };
+      const { ok, data } = editando
+        ? await api(`/api/paellas/${id}`, { method: 'PATCH', body })
+        : await api('/api/paellas', { method: 'POST', body });
+      if (!ok) throw new Error(data?.error || 'no se pudo guardar');
+
+      if (editando) {
+        location.href = `/p/${data.id}`;
+        return;
+      }
+      limpiar();
+      desplegar(false);
+      toast('paella publicada');
+      onGuardada?.(data);
+    } catch (err) {
+      console.error(err);
+      toast(err.message || 'no se pudo guardar', 'error');
+      estado.textContent = '';
+    } finally {
+      enviando = false;
+      publicar.disabled = false;
+      publicar.textContent = textoBoton;
+    }
+  });
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/style.css" />
+  <title>paellas.party</title>
+  <meta name="description" content="Las paellas que va haciendo la diega." />
+  <meta name="theme-color" content="#faf6f0" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="marca" href="/"><span class="logo" aria-hidden="true">🥘</span> <span>paellas<span class="marca-tld">.party</span></span></a>
+    <nav class="topbar-acciones" aria-label="acciones">
+      <a href="/entrar" data-anon-only hidden>entrar</a>
+      <form method="post" action="/api/logout" data-authed-only hidden>
+        <button type="submit">salir</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="page">
+    <!-- el bloque de subir: lo monta page-home.js sólo con sesión -->
+    <section class="composer" id="composer" data-authed-only hidden></section>
+
+    <div class="tagbar" id="tagbar" aria-label="filtrar por hashtag"></div>
+
+    <section class="feed" id="feed"></section>
+    <div class="centinela" id="centinela" aria-hidden="true"></div>
+  </main>
+
+  <script type="module" src="/js/page-home.js"></script>
+</body>
+</html>

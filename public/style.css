@@ -1,0 +1,349 @@
+/* ==========================================================================
+   paellas.party
+
+   Distribución y sobriedad tomadas de notas8: monoespaciada, CERO
+   border-radius, botones que son sólo texto en minúsculas que se ilumina,
+   inputs con una línea fina debajo y nada más, y separación por aire en vez
+   de por cajas. Las meta-líneas son diminutas, en minúsculas y casi
+   transparentes, y se despiertan al pasar por encima.
+
+   Lo que NO se toma de notas8 son los colores: aquí la paleta es de papel y
+   azafrán. Y la columna, que allí va pegada a la izquierda, aquí va centrada.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --papel: #faf6f0;
+  --tinta: #2a231c;
+  --tenue: #7d7264;
+  --mudo: #a1978a;
+  --linea: #e6ddcf;
+  --azafran: #c4761a;
+  --peligro: #b3341f;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --papel: #12100d;
+    --tinta: #ddd4c6;
+    --tenue: #8d8375;
+    --mudo: #6b6357;
+    --linea: #262119;
+    --azafran: #e2a44e;
+    --peligro: #d97a6a;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* El atributo [hidden] SIEMPRE gana, aunque el elemento traiga su propio
+   display (un display del autor le gana al del navegador). */
+[hidden] { display: none !important; }
+
+body {
+  background: var(--papel);
+  color: var(--tinta);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.7;
+  min-height: 100vh;
+  -webkit-text-size-adjust: 100%;
+}
+
+a { color: inherit; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---------- controles: mínimos de verdad ------------------------------- */
+
+button, input, textarea { font-family: var(--mono); font-size: 14px; color: var(--tinta); }
+
+/* botón = texto en minúsculas que se ilumina. Sin borde, sin fondo, sin radio. */
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--tenue);
+  text-transform: lowercase;
+  transition: color .15s;
+}
+button:hover:not(:disabled), button:focus-visible:not(:disabled) { color: var(--azafran); }
+button:disabled { opacity: .4; cursor: default; }
+button.peligro:hover:not(:disabled) { color: var(--peligro); }
+
+input[type="text"], input[type="password"], textarea {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--linea);
+  padding: 6px 0;
+  outline: none;
+  width: 100%;
+}
+input:focus, textarea:focus { border-bottom-color: var(--azafran); }
+textarea { resize: vertical; min-height: 72px; line-height: 1.7; }
+
+/* 16px reales en móvil: por debajo, Safari en iPhone hace zoom al enfocar. */
+@media (max-width: 720px) {
+  input[type="text"], input[type="password"], textarea, button { font-size: 16px; }
+}
+
+/* ---------- barra superior --------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px 22px;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--linea);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--papel) 92%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.marca {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  letter-spacing: -.01em;
+}
+.marca-tld { color: var(--azafran); }
+/* El logo es el emoji de la paella. Se pinta con la fuente de emoji del
+   sistema (en el iPhone y el Mac de la diega, la de Apple) en vez de con un
+   PNG: no hay que servir ningún archivo y siempre está nítido. */
+.logo { font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-size: 17px; line-height: 1; }
+
+.topbar-acciones { display: flex; align-items: baseline; gap: 18px; font-size: 13px; }
+.topbar-acciones form { display: inline; }
+.topbar-acciones a { color: var(--tenue); text-decoration: none; transition: color .15s; }
+.topbar-acciones a:hover, .topbar-acciones a:focus-visible { color: var(--azafran); }
+
+/* ---------- la columna, centrada ---------------------------------------- */
+
+.page {
+  width: min(100% - 40px, 64ch);
+  margin: 0 auto;
+  padding: 34px 0 30vh;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .page { width: min(100% - 24px, 64ch); padding: 24px 0 24vh; }
+}
+
+/* ---------- hashtags: una línea de texto, sin píldoras ------------------ */
+
+.tagbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+  margin-bottom: 34px;
+  font-size: 12px;
+}
+.tagbar:empty { display: none; }
+
+.tag { color: var(--mudo); font-size: 12px; }
+.tag:hover, .tag:focus-visible { color: var(--azafran); }
+.tag.activo { color: var(--azafran); }
+.tag-num { opacity: .45; margin-left: 3px; }
+
+/* Un hashtag escrito dentro de un texto: mismo color, sin subrayado ni caja,
+   para que la frase se siga leyendo como una frase. */
+.tag-inline { font-size: inherit; text-transform: none; color: var(--azafran); }
+
+/* ---------- la lista de paellas ----------------------------------------- */
+
+.feed { display: grid; gap: 96px; }
+@media (max-width: 720px) { .feed { gap: 72px; } }
+
+/* min-width: 0 deja encoger al ítem de grid: sin esto, una palabra larga en
+   una descripción revienta el ancho de la columna en móvil. */
+.paella { min-width: 0; overflow-wrap: anywhere; }
+
+.centinela { height: 1px; }
+
+.feed-enter > * { animation: aparecer .4s ease backwards; }
+.feed-enter > *:nth-child(2) { animation-delay: .05s; }
+.feed-enter > *:nth-child(n+3) { animation-delay: .1s; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(10px); } }
+
+.feed-vacio { color: var(--mudo); font-size: 13px; padding: 40px 0; }
+
+.paella-foto { display: block; width: min(100%, 380px); margin: 0 auto 20px; }
+.paella-foto img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 50%; /* el único redondeo de la página: la paella es redonda */
+  background: color-mix(in srgb, var(--tinta) 6%, transparent);
+}
+
+.paella-titulo { font-size: 15px; font-weight: 600; margin-bottom: 8px; line-height: 1.5; }
+.paella-titulo a { text-decoration: none; }
+.paella-titulo a:hover, .paella-titulo a:focus-visible { color: var(--azafran); }
+.paella-detalle .paella-titulo { font-size: 17px; }
+
+.paella-desc { margin-bottom: 10px; white-space: pre-wrap; color: var(--tinta); }
+
+.paella-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 14px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+/* La meta: diminuta, en minúsculas y casi transparente hasta que te acercas. */
+.paella-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 2px 14px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--tenue);
+  text-transform: lowercase;
+  letter-spacing: .05em;
+  opacity: .5;
+  transition: opacity .15s;
+}
+.paella:hover .paella-meta, .paella:focus-within .paella-meta { opacity: 1; }
+.paella-meta button, .paella-meta a { font-size: 11px; color: var(--mudo); text-decoration: none; }
+.paella-meta a:hover, .paella-meta a:focus-visible { color: var(--azafran); }
+
+/* ---------- el bloque de subir ------------------------------------------ */
+
+/* Vive arriba de la lista, como el composer de notas8: se abre la web y ya
+   está ahí. Plegado es una línea de texto; desplegado, el formulario entero. */
+.composer {
+  display: grid;
+  gap: 20px;
+  padding-bottom: 30px;
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--linea);
+}
+.composer-abrir { justify-self: center; font-size: 13px; }
+
+/* Sin foto elegida no hay nada que encuadrar: el escenario vacío sería un
+   cuadrado gris enorme pidiendo explicación. Aparece cuando hay foto. */
+.cropper:not(.has-image) .cropper-stage { display: none; }
+
+.composer-foto { display: grid; justify-items: center; gap: 6px; font-size: 13px; }
+.composer-campos { display: grid; gap: 18px; text-align: left; }
+.composer-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 24px; font-size: 13px; }
+.composer .publicar { color: var(--azafran); font-weight: 500; }
+
+.ayuda { font-size: 11px; color: var(--mudo); text-transform: lowercase; letter-spacing: .05em; line-height: 1.5; }
+.sugerencias { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 12px; }
+
+.titulo-pagina {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: lowercase;
+  letter-spacing: .05em;
+  color: var(--tenue);
+  margin-bottom: 28px;
+}
+
+/* ---------- el recortador circular -------------------------------------- */
+
+.cropper { display: grid; justify-items: center; gap: 12px; }
+
+.cropper-stage {
+  position: relative;
+  width: min(100%, 340px);
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--tinta) 5%, transparent);
+  /* Cuadrado y no círculo: lo que se guarda es el cuadrado, y ver un poco por
+     fuera del círculo es justo lo que ayuda a encuadrar la paella. */
+  touch-action: none; /* sin esto, arrastrar haría scroll de la página */
+  cursor: grab;
+}
+.cropper-stage:active { cursor: grabbing; }
+
+.cropper-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* El círculo de encuadre: un aro fino y, con una sombra de radio enorme, todo
+   lo que queda fuera apagado (el escenario recorta con overflow: hidden). */
+.cropper-mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--papel) 80%, transparent),
+    0 0 0 9999px color-mix(in srgb, var(--papel) 80%, transparent);
+}
+.cropper:not(.has-image) .cropper-mask { box-shadow: none; }
+
+.cropper-zoom-row { display: flex; align-items: center; gap: 12px; width: min(100%, 340px); }
+.cropper-zoom { flex: 1; accent-color: var(--azafran); }
+.cropper-zoom-icon { color: var(--mudo); font-size: 13px; line-height: 1; width: 1ch; }
+
+/* ---------- entrar ------------------------------------------------------ */
+
+.cuerpo-entrar { display: grid; place-items: center; min-height: 100svh; padding: 20vh 20px; }
+.caja-entrar { display: grid; gap: 18px; width: min(100%, 300px); text-align: center; }
+.caja-entrar h1 { font-size: 15px; font-weight: 600; }
+.caja-entrar .logo { font-size: 30px; }
+.form-entrar { display: grid; gap: 14px; }
+.form-entrar button { justify-self: center; color: var(--azafran); }
+.error-entrar { color: var(--peligro); font-size: 12px; min-height: 1.4em; }
+
+/* ---------- avisos ------------------------------------------------------ */
+
+#toastHost {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  z-index: 50;
+  pointer-events: none;
+}
+.toast {
+  background: var(--tinta);
+  color: var(--papel);
+  padding: 7px 14px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .2s, transform .2s;
+}
+.toast.show { opacity: 1; transform: none; }
+.toast-error { background: var(--peligro); color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

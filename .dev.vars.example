@@ -1,0 +1,4 @@
+# Copia este archivo a .dev.vars (gitignored) para `wrangler dev`.
+# En producción estos valores NO van aquí: se ponen con `wrangler secret put`.
+PASSWORD=la-contraseña-de-la-diega
+AUTH_SECRET=un-string-largo-y-aleatorio-que-firma-la-cookie-de-sesion

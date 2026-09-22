@@ -1,0 +1,49 @@
+name = "paella"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# account_id y database_id se rellenan al crear los recursos en la cuenta de
+# Cloudflare de la diega (ver README → "montarlo desde cero"). Mientras estén
+# vacíos, `npm run dev` funciona igual (usa D1/R2 locales en .wrangler/), pero
+# `npm run deploy` fallará con un mensaje claro.
+account_id = "REEMPLAZA_ACCOUNT_ID"
+
+# Dominio en producción: el Worker sirve el apex y el www como custom domains.
+# Cloudflare crea los registros DNS solo al desplegar, siempre que la zona
+# paellas.party esté añadida a esta misma cuenta de Cloudflare.
+routes = [
+  { pattern = "paellas.party", custom_domain = true },
+  { pattern = "www.paellas.party", custom_domain = true }
+]
+
+# El nombre de usuario no es un secreto (se teclea en el formulario); la
+# contraseña sí, y va por `wrangler secret put PASSWORD`.
+[vars]
+USUARIO = "ladiega"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# El worker ve TODAS las peticiones antes que los assets estáticos. Sin esto,
+# /subir se serviría sin pasar por el middleware de auth y los POST a rutas con
+# archivo homónimo devolverían 405.
+run_worker_first = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "paella-db"
+database_id = "REEMPLAZA_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "STORAGE"
+bucket_name = "paella-storage"
+
+# Rate limiting nativo de Workers (sin KV ni recurso externo). Protege las
+# escrituras autenticadas (crear paellas, subir fotos) de un bucle accidental
+# que sature R2/D1. namespace_id es un id lógico que eliges tú; `period` sólo
+# admite 10 o 60 (segundos).
+[[unsafe.bindings]]
+name = "WRITE_LIMITER"
+type = "ratelimit"
+namespace_id = "3001"
+simple = { limit = 60, period = 60 }

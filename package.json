@@ -1,0 +1,26 @@
+{
+  "name": "paella",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create paella-db",
+    "db:migrate": "wrangler d1 execute paella-db --local --file=schema.sql",
+    "db:migrate:remote": "wrangler d1 execute paella-db --remote --file=schema.sql",
+    "r2:create": "wrangler r2 bucket create paella-storage"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260921.1",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.118.0"
+  }
+}
