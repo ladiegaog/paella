@@ -7,7 +7,7 @@ import {
   maxZoom,
   outputSide,
   zoomAround,
-} from "../public/js/geom.js";
+} from "../../public/js/geom.js";
 
 describe("coverScale", () => {
   it("escala por el lado corto (la foto cubre el escenario)", () => {

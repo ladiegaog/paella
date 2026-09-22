@@ -1,3 +1,5 @@
+import { CRITERIOS } from "../public/js/comun/notas.js";
+
 // ---------- tipos ----------
 
 export interface PaellaRow {
@@ -31,10 +33,12 @@ export interface Paella extends PaellaRow {
   fotos: FotoRow[];
 }
 
-// Las cuatro notas, en el orden en que se enseñan.
-export const CRITERIOS = ["punto_arroz", "sabor_caldo", "socarrat", "sinergia"] as const;
-export type Criterio = (typeof CRITERIOS)[number];
+// Los criterios viven en public/js/comun/notas.js, compartido con el navegador.
+const CLAVES = CRITERIOS.map((c) => c.clave);
+export type Criterio = (typeof CRITERIOS)[number]["clave"];
 export type Notas = Record<Criterio, number | null>;
+
+export type FotoNueva = { r2_key: string; width: number | null; height: number | null };
 
 // D1 limita los parámetros vinculados por query (~100). Cualquier lista de ids
 // en un `IN (?,?,…)` hay que trocearla por debajo de ese tope.
@@ -105,7 +109,7 @@ async function attachExtras(db: D1Database, rows: PaellaRow[]): Promise<Paella[]
 
 export async function listPaellas(
   db: D1Database,
-  opts: { cursor?: string; tag?: string; q?: string; limit: number },
+  opts: { cursor?: string; tag?: string; limit: number },
 ): Promise<{ paellas: Paella[]; nextCursor: string | null }> {
   const limit = Math.min(60, Math.max(1, opts.limit));
   const conds: string[] = ["p.deleted_at IS NULL"];
@@ -116,14 +120,6 @@ export async function listPaellas(
       "EXISTS (SELECT 1 FROM hashtags h WHERE h.paella_id = p.id AND h.tag = ?)",
     );
     args.push(opts.tag.toLowerCase());
-  }
-  if (opts.q) {
-    // Cap defensivo: truncar a 200 (no descartar el filtro). Escapar wildcards
-    // para que un "%" escrito en la búsqueda no case con todo.
-    const escaped = opts.q.slice(0, 200).replace(/[\\%_]/g, "\\$&");
-    const pattern = `%${escaped}%`;
-    conds.push("(p.titulo LIKE ? ESCAPE '\\' OR p.descripcion LIKE ? ESCAPE '\\')");
-    args.push(pattern, pattern);
   }
   if (opts.cursor) {
     // El cursor codifica (created_at|id) para desempatar paellas del mismo ms.
@@ -181,6 +177,51 @@ export async function listHashtags(
 }
 
 // ---------- escrituras ----------
+//
+// Cada escritura va en UN db.batch(), que en D1 es una transacción: o entra la
+// paella con sus tags y sus fotos, o no entra nada. Antes eran varias queries
+// sueltas, y si fallaba la de las fotos la paella se quedaba creada a medias,
+// el navegador veía un error y al reintentar salía duplicada.
+
+// A qué paella se refieren las filas de tags y fotos: al editar, un id
+// conocido; al crear, la que se acaba de insertar en este mismo batch.
+type RefPaella = { sql: string; args: unknown[] };
+
+const porId = (id: number): RefPaella => ({ sql: "?", args: [id] });
+
+// Dentro de la transacción del batch nadie más escribe, así que el id más alto
+// es el de la paella recién insertada. (last_insert_rowid() no sirve: cambia
+// con cada INSERT de hashtags.)
+const LA_RECIEN_CREADA: RefPaella = { sql: "(SELECT MAX(id) FROM paellas)", args: [] };
+
+// Sentencias que dejan exactamente estos tags en la paella.
+function sentenciasTags(db: D1Database, ref: RefPaella, tags: string[]) {
+  const unicos = [...new Set(tags.map((t) => t.toLowerCase()))].filter(Boolean);
+  return [
+    db.prepare(`DELETE FROM hashtags WHERE paella_id = ${ref.sql}`).bind(...ref.args),
+    ...unicos.map((t) =>
+      db
+        .prepare(`INSERT OR IGNORE INTO hashtags (paella_id, tag) VALUES (${ref.sql}, ?)`)
+        .bind(...ref.args, t),
+    ),
+  ];
+}
+
+// Sentencias que dejan exactamente estas fotos de galería, en este orden. Los
+// objetos de R2 que salen NO se borran del bucket — mismo criterio conservador
+// que el borrado de paellas, para que un cambio por error se pueda deshacer.
+function sentenciasFotos(db: D1Database, ref: RefPaella, fotos: FotoNueva[]) {
+  return [
+    db.prepare(`DELETE FROM fotos WHERE paella_id = ${ref.sql}`).bind(...ref.args),
+    ...fotos.map((f, i) =>
+      db
+        .prepare(
+          `INSERT INTO fotos (paella_id, r2_key, width, height, position) VALUES (${ref.sql}, ?, ?, ?, ?)`,
+        )
+        .bind(...ref.args, f.r2_key, f.width, f.height, i),
+    ),
+  ];
+}
 
 export async function createPaella(
   db: D1Database,
@@ -190,27 +231,34 @@ export async function createPaella(
     r2_key: string;
     size: number | null;
     notas: Notas;
+    tags: string[];
+    fotos: FotoNueva[];
   },
-): Promise<PaellaRow> {
-  const row = await db
+): Promise<number> {
+  const insert = db
     .prepare(
-      `INSERT INTO paellas (titulo, descripcion, r2_key, size, punto_arroz, sabor_caldo, socarrat, sinergia, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`,
+      `INSERT INTO paellas (titulo, descripcion, r2_key, size, ${CLAVES.join(", ")}, created_at)
+       VALUES (?, ?, ?, ?, ${CLAVES.map(() => "?").join(", ")}, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       RETURNING id`,
     )
     .bind(
       fields.titulo,
       fields.descripcion,
       fields.r2_key,
       fields.size,
-      ...CRITERIOS.map((c) => fields.notas[c]),
-    )
-    .first<PaellaRow>();
-  return row!;
+      ...CLAVES.map((c) => fields.notas[c]),
+    );
+  const [creada] = await db.batch<{ id: number }>([
+    insert,
+    ...sentenciasTags(db, LA_RECIEN_CREADA, fields.tags),
+    ...sentenciasFotos(db, LA_RECIEN_CREADA, fields.fotos),
+  ]);
+  return creada.results[0].id;
 }
 
 // Actualiza una paella y sella edited_at. `r2_key`/`size` sólo se tocan si
-// vienen (cambiar la foto es opcional al editar). false si no existe o está
-// en la papelera.
+// vienen (cambiar la foto es opcional al editar), y la galería sólo si `fotos`
+// no es null. false si no existe o está en la papelera.
 export async function updatePaella(
   db: D1Database,
   id: number,
@@ -220,11 +268,22 @@ export async function updatePaella(
     notas: Notas;
     r2_key?: string | null;
     size?: number | null;
+    tags: string[];
+    fotos: FotoNueva[] | null;
   },
 ): Promise<boolean> {
+  // Se comprueba antes y no con el `changes` del UPDATE: dentro del batch, las
+  // fotos de una paella que no existe romperían la foreign key y la respuesta
+  // sería un 500 en vez de un 404.
+  const existe = await db
+    .prepare("SELECT 1 FROM paellas WHERE id = ? AND deleted_at IS NULL")
+    .bind(id)
+    .first();
+  if (!existe) return false;
+
   const sets = ["titulo = ?", "descripcion = ?"];
   const args: unknown[] = [fields.titulo, fields.descripcion];
-  for (const c of CRITERIOS) {
+  for (const c of CLAVES) {
     sets.push(`${c} = ?`);
     args.push(fields.notas[c]);
   }
@@ -233,12 +292,13 @@ export async function updatePaella(
     args.push(fields.r2_key, fields.size ?? null);
   }
   sets.push("edited_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')");
-  args.push(id);
-  const res = await db
-    .prepare(`UPDATE paellas SET ${sets.join(", ")} WHERE id = ? AND deleted_at IS NULL`)
-    .bind(...args)
-    .run();
-  return (res.meta.changes ?? 0) > 0;
+
+  await db.batch([
+    db.prepare(`UPDATE paellas SET ${sets.join(", ")} WHERE id = ?`).bind(...args, id),
+    ...sentenciasTags(db, porId(id), fields.tags),
+    ...(fields.fotos ? sentenciasFotos(db, porId(id), fields.fotos) : []),
+  ]);
+  return true;
 }
 
 // Soft delete: marca deleted_at y conserva el objeto de R2, así que una paella
@@ -253,38 +313,16 @@ export async function deletePaella(db: D1Database, id: number): Promise<boolean>
   return (res.meta.changes ?? 0) > 0;
 }
 
-// Fija el conjunto exacto de fotos de galería de una paella: borra las filas
-// anteriores y reinserta en el orden recibido. Los objetos de R2 que salen NO
-// se borran del bucket — mismo criterio conservador que el borrado de paellas,
-// para que un cambio por error se pueda deshacer.
-export async function setFotos(
-  db: D1Database,
-  paellaId: number,
-  items: Array<{ r2_key: string; width: number | null; height: number | null }>,
-) {
-  await db.prepare("DELETE FROM fotos WHERE paella_id = ?").bind(paellaId).run();
-  if (items.length === 0) return;
-  const stmt = db.prepare(
-    "INSERT INTO fotos (paella_id, r2_key, width, height, position) VALUES (?, ?, ?, ?, ?)",
-  );
-  await db.batch(items.map((f, i) => stmt.bind(paellaId, f.r2_key, f.width, f.height, i)));
-}
-
 // ---------- export ----------
 
+// La copia lleva TODO, papelera incluida (las borradas llevan su deleted_at):
+// una copia de seguridad que se deja fuera lo borrado por error no sirve para
+// lo que más falta hace.
 export async function exportAll(db: D1Database) {
-  const [paellas, hashtags, fotos] = await Promise.all([
-    db.prepare("SELECT * FROM paellas WHERE deleted_at IS NULL ORDER BY id").all(),
-    db
-      .prepare(
-        "SELECT * FROM hashtags WHERE paella_id IN (SELECT id FROM paellas WHERE deleted_at IS NULL) ORDER BY paella_id, tag",
-      )
-      .all(),
-    db
-      .prepare(
-        "SELECT * FROM fotos WHERE paella_id IN (SELECT id FROM paellas WHERE deleted_at IS NULL) ORDER BY paella_id, position",
-      )
-      .all(),
+  const [paellas, hashtags, fotos] = await db.batch([
+    db.prepare("SELECT * FROM paellas ORDER BY id"),
+    db.prepare("SELECT * FROM hashtags ORDER BY paella_id, tag"),
+    db.prepare("SELECT * FROM fotos ORDER BY paella_id, position"),
   ]);
   return {
     exported_at: new Date().toISOString(),

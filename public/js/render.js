@@ -11,11 +11,11 @@
 import { el, formatFecha } from './utils.js';
 import { renderPuntuacion } from './puntuacion.js';
 import { abrirVisor } from './visor.js';
+import { TAG_RE, extractHashtags } from './comun/tags.js';
 
-// Recorre el texto con una regex en vez de partir por espacios para no perder
-// los saltos de línea ni la puntuación pegada al tag ("#arroz,").
-const TAG_RE = /#([\p{L}\p{N}_]+)/gu;
-
+// Recorre el texto con la regex de los tags (la misma con la que el servidor
+// los extrae) en vez de partir por espacios, para no perder los saltos de línea
+// ni la puntuación pegada al tag ("#arroz,").
 function textoConTags(texto, onTag) {
   const frag = document.createDocumentFragment();
   let last = 0;
@@ -114,9 +114,7 @@ export function renderPaella(paella, opts = {}) {
   // --- 6. los hashtags ---
   // Sólo los que NO aparecen ya escritos en el texto, para no repetirlos dos
   // veces en la misma tarjeta.
-  const enTexto = new Set(
-    [...`${paella.titulo} ${paella.descripcion || ''}`.matchAll(TAG_RE)].map((m) => m[1].toLowerCase()),
-  );
+  const enTexto = new Set(extractHashtags(`${paella.titulo} ${paella.descripcion || ''}`));
   const sueltos = (paella.hashtags || []).filter((t) => !enTexto.has(t));
   if (sueltos.length) {
     const fila = el('div', { class: 'paella-tags' });

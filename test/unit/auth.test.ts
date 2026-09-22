@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeToken, timingSafeEqual, verifyToken } from "../src/auth";
+import { makeToken, timingSafeEqual, verifyToken } from "../../src/auth";
 
 describe("timingSafeEqual", () => {
   it("iguales → true; distintas → false", () => {

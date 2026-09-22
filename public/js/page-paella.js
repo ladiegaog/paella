@@ -1,20 +1,21 @@
 // ----- ficha de una paella (/p/:id) -----
 //
 // Existe para que un enlace a una paella concreta se pueda compartir. Lee el id
-// de la ruta (el worker sirve este mismo HTML para cualquier /p/N) y pide el
-// JSON.
+// de la ruta (el worker sirve este mismo HTML para cualquier /p/N, con las
+// etiquetas de la vista previa ya rellenas) y pide el JSON.
 
-import { $, el, toast } from './utils.js';
+import { $, el } from './utils.js';
 import { api } from './api.js';
 import { checkAuth, isAuthed } from './auth.js';
+import { borrarPaella } from './acciones.js';
 import { renderPaella } from './render.js';
 
 const contenedor = $('#detalle');
 const id = location.pathname.split('/').filter(Boolean)[1];
 
 (async () => {
-  await checkAuth();
-  const { ok, status, data } = await api(`/api/paellas/${id}`);
+  // La sesión y la paella a la vez: no dependen la una de la otra.
+  const [, { ok, status, data }] = await Promise.all([checkAuth(), api(`/api/paellas/${id}`)]);
   contenedor.replaceChildren();
 
   if (!ok) {
@@ -35,10 +36,7 @@ const id = location.pathname.split('/').filter(Boolean)[1];
       // Desde la ficha, pulsar un hashtag lleva a la portada ya filtrada.
       onTag: (tag) => { location.href = `/?tag=${encodeURIComponent(tag)}`; },
       onBorrar: async (paella) => {
-        if (!confirm(`¿borrar "${paella.titulo}"?`)) return;
-        const res = await api(`/api/paellas/${paella.id}`, { method: 'DELETE' });
-        if (!res.ok) return toast('no se pudo borrar', 'error');
-        location.href = '/';
+        if (await borrarPaella(paella)) location.href = '/';
       },
     }),
   );

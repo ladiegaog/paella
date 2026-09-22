@@ -12,8 +12,24 @@
   <meta name="apple-mobile-web-app-title" content="paellas" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <link rel="stylesheet" href="/style.css" />
+  <link rel="preload" href="/vendor/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
   <script src="/js/pwa.js" defer></script>
   <title>una paella — paellas.party</title>
+  <!-- Vista previa al compartir el enlace. El Worker (src/paginas.ts) rellena
+       estos valores con los de la paella antes de servir la página; los de
+       aquí son sólo el respaldo. -->
+  <meta name="description" content="Una de las paellas de la diega." />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="paellas.party" />
+  <meta property="og:locale" content="es_ES" />
+  <meta property="og:title" content="una paella" />
+  <meta property="og:description" content="Una de las paellas de la diega." />
+  <meta property="og:url" content="" />
+  <meta property="og:image" content="" />
+  <meta property="og:image:width" content="" />
+  <meta property="og:image:height" content="" />
+  <meta property="og:image:alt" content="" />
+  <meta name="twitter:card" content="summary_large_image" />
   <!-- Dos theme-color: la barra del navegador y la de la app instalada siguen
        al tema del sistema en vez de quedarse siempre en claro. -->
   <meta name="theme-color" content="#faf6f0" media="(prefers-color-scheme: light)" />

@@ -7,17 +7,28 @@
 // hay forma de que el usuario se entere; por eso lo de red-primero para todo lo
 // que cambia, y caché sólo para lo que no cambia nunca.
 //
-// Al tocar cualquier archivo de public/ hay que subir VERSION: es lo que borra
-// las cachés viejas y obliga a rellenarlas.
+// VERSION no se toca a mano: el Worker (src/paginas.ts) sirve este archivo con
+// el id del despliegue en lugar de __VERSION__. Cada deploy cambia así sw.js,
+// el navegador instala el worker nuevo y éste borra las cachés viejas.
 
-const VERSION = 'v1';
+const VERSION = '__VERSION__';
 const CACHE_APP = `paella-app-${VERSION}`;
+const CACHE_API = `paella-api-${VERSION}`;
 const CACHE_FOTOS = `paella-fotos-${VERSION}`;
 
 // Tope de fotos guardadas. A ~80 KB la cenital y ~200 KB una de galería, 120
 // fotos son unos 20 MB: suficiente para que la lista se vea entera sin red y
 // lejos del límite que cualquier navegador da a un sitio.
 const MAX_FOTOS = 120;
+
+// Tope de respuestas de la API guardadas. Cada página de la lista y cada filtro
+// es una entrada distinta (?cursor=…&tag=…); sin tope, esto crecía sin fin.
+const MAX_API = 40;
+
+// Lo único de la API que se guarda para verlo sin conexión: las lecturas
+// públicas. Nada de /api/me (una sesión vieja enseñaría el bloque de subir a
+// quien ya no la tiene) ni de /api/export (lleva la papelera).
+const API_CACHEABLE = /^\/api\/(paellas(\/\d+)?|hashtags)$/;
 
 // El esqueleto: lo que hace falta para pintar la portada. Si esta lista se
 // queda corta la web sigue funcionando (lo que falte se pide a la red), sólo
@@ -28,20 +39,25 @@ const ESQUELETO = [
   '/manifest.json',
   '/favicon.svg',
   '/icon-192.png',
+  '/vendor/fonts/jetbrains-mono.woff2',
   '/js/page-home.js',
   '/js/api.js',
+  '/js/acciones.js',
   '/js/auth.js',
-  '/js/state.js',
   '/js/utils.js',
   '/js/feed.js',
   '/js/render.js',
   '/js/puntuacion.js',
   '/js/visor.js',
   '/js/composer.js',
+  '/js/galeria-editor.js',
   '/js/cropper.js',
   '/js/compressor.js',
   '/js/geom.js',
   '/js/pwa.js',
+  '/js/comun/reglas.js',
+  '/js/comun/tags.js',
+  '/js/comun/notas.js',
 ];
 
 self.addEventListener('install', (e) => {
@@ -58,7 +74,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     (async () => {
-      const vivas = [CACHE_APP, CACHE_FOTOS];
+      const vivas = [CACHE_APP, CACHE_API, CACHE_FOTOS];
       const nombres = await caches.keys();
       await Promise.all(nombres.filter((n) => !vivas.includes(n)).map((n) => caches.delete(n)));
       await self.clients.claim();
@@ -66,11 +82,25 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// Recorta una caché a sus `max` entradas más nuevas. Las claves salen en orden
+// de inserción, así que las primeras son las más viejas.
+async function recortar(cache, max) {
+  const claves = await cache.keys();
+  if (claves.length > max) {
+    await Promise.all(claves.slice(0, claves.length - max).map((k) => cache.delete(k)));
+  }
+}
+
 // Red primero, y si no hay red lo que haya en caché. Para el HTML y la API.
-async function redPrimero(request, cache, respaldo) {
+async function redPrimero(request, cache, { respaldo, max } = {}) {
   try {
     const res = await fetch(request);
-    if (res.ok) cache.put(request, res.clone()).catch(() => {});
+    if (res.ok) {
+      cache
+        .put(request, res.clone())
+        .then(() => max && recortar(cache, max))
+        .catch(() => {});
+    }
     return res;
   } catch (_) {
     return (await cache.match(request)) || (respaldo && (await cache.match(respaldo))) || Response.error();
@@ -92,8 +122,7 @@ async function cacheYRefresco(request, cache) {
 }
 
 // Las fotos son inmutables (su nombre es aleatorio y no se reutiliza nunca), así
-// que caché primero sin revalidar. Se recorta la caché por el principio: las
-// claves salen en orden de inserción, así que las primeras son las más viejas.
+// que caché primero sin revalidar.
 async function fotoDeCache(request) {
   const cache = await caches.open(CACHE_FOTOS);
   const guardada = await cache.match(request);
@@ -102,10 +131,7 @@ async function fotoDeCache(request) {
   const res = await fetch(request);
   if (res.ok) {
     await cache.put(request, res.clone());
-    const claves = await cache.keys();
-    if (claves.length > MAX_FOTOS) {
-      await Promise.all(claves.slice(0, claves.length - MAX_FOTOS).map((k) => cache.delete(k)));
-    }
+    await recortar(cache, MAX_FOTOS);
   }
   return res;
 }
@@ -119,30 +145,26 @@ self.addEventListener('fetch', (e) => {
 
   const url = new URL(request.url);
   const propia = url.origin === self.location.origin;
-  const fuentes = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
-
-  if (!propia && !fuentes) return; // cualquier otra cosa de fuera, a la red
+  if (!propia) return; // lo de fuera, a la red (ya no se usa nada de fuera)
 
   // Las fotos de R2.
-  if (propia && url.pathname.startsWith('/r2/')) {
+  if (url.pathname.startsWith('/r2/')) {
     e.respondWith(fotoDeCache(request).catch(() => Response.error()));
     return;
   }
 
-  if (propia && url.pathname.startsWith('/api/')) {
-    // /api/me dice si hay sesión: servirlo de una caché vieja enseñaría el
-    // bloque de subir a quien ya no la tiene. Siempre a la red.
-    if (url.pathname === '/api/me') return;
-    e.respondWith(caches.open(CACHE_APP).then((c) => redPrimero(request, c)));
+  if (url.pathname.startsWith('/api/')) {
+    if (!API_CACHEABLE.test(url.pathname)) return; // siempre a la red, sin guardar
+    e.respondWith(caches.open(CACHE_API).then((c) => redPrimero(request, c, { max: MAX_API })));
     return;
   }
 
   // Navegaciones: red primero, y sin conexión la portada guardada.
   if (request.mode === 'navigate') {
-    e.respondWith(caches.open(CACHE_APP).then((c) => redPrimero(request, c, '/')));
+    e.respondWith(caches.open(CACHE_APP).then((c) => redPrimero(request, c, { respaldo: '/' })));
     return;
   }
 
-  // El resto (CSS, módulos JS, iconos, tipografías): caché y refresco.
+  // El resto (CSS, módulos JS, iconos, tipografía, códec WebP): caché y refresco.
   e.respondWith(caches.open(CACHE_APP).then((c) => cacheYRefresco(request, c)));
 });

@@ -3,18 +3,10 @@
 --
 -- Hasta aquí una paella era título + foto circular + descripción + hashtags.
 -- Esta migración añade:
---   · cuatro notas del 0 al 10 (la nota global es su media, no se guarda:
---     calcularla al vuelo evita que se quede desincronizada de sus partes)
+--   · cuatro notas del 0 al 10, cada una opcional (NULL = sin puntuar ese
+--     criterio). La nota global es la media de las puestas y no se guarda:
+--     calcularla al vuelo evita que se quede desincronizada de sus partes.
 --   · una galería de fotos sueltas, aparte de la cenital circular
---
--- Se aplica con:
---   npm run db:migrate:0001          (D1 LOCAL)
---   npm run db:migrate:0001:remote   (producción)
---
--- SQLite no tiene ADD COLUMN IF NOT EXISTS: re-aplicar esto da error de
--- "duplicate column name", que es inofensivo pero no es idempotente. Se aplica
--- UNA vez por base de datos. Las instalaciones nuevas no lo necesitan: el
--- schema.sql ya trae las columnas.
 -- ============================================================================
 
 ALTER TABLE paellas ADD COLUMN punto_arroz INTEGER;

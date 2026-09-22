@@ -11,6 +11,10 @@
 // navegador. Es single-thread → no necesita SharedArrayBuffer ni cabeceras
 // COOP/COEP, así que la web no tiene que estar cross-origin isolated.
 //
+// El códec se sirve desde el propio dominio (public/vendor/webp/, copiado de
+// node_modules con `npm run vendor`), no desde un CDN: así no depende de un
+// tercero, lo guarda el service worker y la CSP puede ser 'self'.
+//
 // Carga del WASM (la parte delicada):
 //   - El bundle "+esm" no sabe resolver la ruta de su propio .wasm, así que lo
 //     hacemos a mano: fetch del .wasm + WebAssembly.compile + instantiateWasm.
@@ -18,21 +22,21 @@
 //   - meta.js trae defaultOptions: el encode() de bajo nivel EXIGE todas las
 //     opciones presentes (si no, lanza 'Missing field: "lossless"').
 //   - Todo lazy: se carga la primera vez que se comprime una foto.
-// Si el WASM no carga (red caída, CDN bloqueado) caemos a canvas.toBlob: en
+// Si el WASM no carga (red caída, navegador raro) caemos a canvas.toBlob: en
 // escritorio saldrá WebP igual; en iOS saldrá PNG, pero es mejor subir algo
 // que fallar.
 
 import { outputSide } from './geom.js';
 
 const QUALITY = 85;        // 0..100 para jsquash (toBlob usa 0..1)
-export const TARGET_SIDE = 1200;   // lado de la cenital circular (cuadrada)
+const TARGET_SIDE = 1200;          // lado de la cenital circular (cuadrada)
 const GALERIA_MAX = 1600;          // lado largo de las fotos de galería
 
-const BASE = 'https://cdn.jsdelivr.net/npm/@jsquash/webp@1.5.0';
 // Versión NO-SIMD: un único .wasm que funciona en todos los navegadores sin
 // depender de detección de features.
-const GLUE_URL = `${BASE}/codec/enc/webp_enc.js`;
-const WASM_URL = `${BASE}/codec/enc/webp_enc.wasm`;
+const BASE = '/vendor/webp';
+const GLUE_URL = `${BASE}/webp_enc.js`;
+const WASM_URL = `${BASE}/webp_enc.wasm`;
 const META_URL = `${BASE}/meta.js`;
 
 let encoderPromise = null;
@@ -40,8 +44,8 @@ function loadWebpEncoder() {
   if (!encoderPromise) {
     encoderPromise = (async () => {
       const [{ default: moduleFactory }, meta, wasmBuf] = await Promise.all([
-        import(/* @vite-ignore */ GLUE_URL),
-        import(/* @vite-ignore */ META_URL),
+        import(GLUE_URL),
+        import(META_URL),
         fetch(WASM_URL).then((r) => {
           if (!r.ok) throw new Error(`fetch wasm → ${r.status}`);
           return r.arrayBuffer();
@@ -89,7 +93,7 @@ function canvasToBlob(canvas, type, quality) {
 }
 
 // Codifica a WebP lo que haya en el lienzo. Camino principal: el encoder WASM.
-// Si no carga (red caída, CDN bloqueado) cae a canvas.toBlob, que en escritorio
+// Si no carga (red caída, navegador raro) cae a canvas.toBlob, que en escritorio
 // da WebP igual y en iOS da PNG — mejor subir algo que fallar.
 async function aWebp(canvas, ctx, w, h) {
   try {

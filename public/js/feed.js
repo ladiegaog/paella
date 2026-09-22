@@ -4,7 +4,10 @@ import { api } from './api.js';
 import { el, toast } from './utils.js';
 import { renderPaella } from './render.js';
 
-export function createFeed({ container, sentinel, cardOpts }) {
+// `antesDePintar` es una promesa a la que esperan las tarjetas antes de
+// pintarse (la sesión: con ella llevan editar y borrar). La petición no la
+// espera, así que las dos cosas van en paralelo.
+export function createFeed({ container, sentinel, cardOpts, antesDePintar = null }) {
   let cursor = null;
   let tag = null;
   let loading = false;
@@ -22,7 +25,7 @@ export function createFeed({ container, sentinel, cardOpts }) {
     if (cursor) params.set('cursor', cursor);
     if (tag) params.set('tag', tag);
 
-    const { ok, data } = await api(`/api/paellas?${params}`);
+    const [{ ok, data }] = await Promise.all([api(`/api/paellas?${params}`), antesDePintar]);
     if (mine !== token) return; // filtro cambiado mientras cargaba
     loading = false;
 
@@ -35,16 +38,25 @@ export function createFeed({ container, sentinel, cardOpts }) {
     }
     cursor = data.nextCursor;
     if (!cursor) done = true;
-    if (container.childElementCount === 0) {
-      container.append(
-        el('p', {
-          class: 'feed-vacio',
-          text: tag ? `todavía no hay ninguna paella con #${tag}` : 'todavía no hay paellas por aquí…',
-        }),
-      );
-    }
+    if (container.childElementCount === 0) pintarVacio();
     // Encadena si el centinela sigue a la vista (pantalla alta, pocas paellas).
     if (!done && sentinel && enPantalla(sentinel)) loadMore();
+  }
+
+  function pintarVacio() {
+    container.append(
+      el('p', {
+        class: 'feed-vacio',
+        text: tag ? `todavía no hay ninguna paella con #${tag}` : 'todavía no hay paellas por aquí…',
+      }),
+    );
+  }
+
+  // Quita una tarjeta (al borrar). Si era la última, sale el aviso de lista
+  // vacía en vez de quedarse la página en blanco.
+  function quitar(card) {
+    card.remove();
+    if (container.childElementCount === 0 && done) pintarVacio();
   }
 
   function enPantalla(node) {
@@ -80,5 +92,5 @@ export function createFeed({ container, sentinel, cardOpts }) {
     loadMore();
   }
 
-  return { start, setFilter, get tag() { return tag; } };
+  return { start, setFilter, quitar, get tag() { return tag; } };
 }

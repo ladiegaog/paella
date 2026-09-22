@@ -1,7 +1,6 @@
 // ----- comprobación de sesión + visibilidad anon/logueada -----
 
 import { $$ } from './utils.js';
-import { LIMITS } from './state.js';
 import { api } from './api.js';
 
 let IS_AUTHED = false;
@@ -10,7 +9,6 @@ export const isAuthed = () => IS_AUTHED;
 export async function checkAuth() {
   const { ok, data } = await api('/api/me');
   IS_AUTHED = ok && !!data?.authed;
-  if (data?.maxImageBytes) LIMITS.image = data.maxImageBytes;
   applyAuthVisibility();
   return IS_AUTHED;
 }

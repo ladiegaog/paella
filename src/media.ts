@@ -27,13 +27,6 @@ const ALLOWED_IMAGE: Record<string, string> = {
   "image/avif": "avif",
 };
 
-// Tras la compresión en el navegador (WebP calidad 85, lado 1200) una foto pesa
-// ~150 KB. Si llega algo cercano al tope es señal de que la compresión no se
-// aplicó; el tope está para que un fallo no llene R2, no para ajustar al byte.
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
-
-export const maxImageBytes = MAX_IMAGE_BYTES;
-
 // Devuelve la extensión para un content-type permitido, o null si no lo está.
 export function extForContentType(ct: string): string | null {
   return ALLOWED_IMAGE[ct.split(";")[0].trim().toLowerCase()] ?? null;

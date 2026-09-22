@@ -2,18 +2,25 @@
 //
 // Vive arriba de la lista, como el composer de notas8: se abre la web ya
 // logueada y está ahí, sin navegar a ninguna parte. Plegado es una línea de
-// texto; desplegado, el recortador y los tres campos.
+// texto; desplegado, el recortador y los campos.
 //
 // El mismo módulo sirve para editar (/subir?id=N): con `id` arranca abierto,
 // carga la paella y guarda con PATCH. Cambiar la foto al editar es opcional —
 // si no elige archivo nuevo, se conserva la que había.
+//
+// Las piezas con estado propio van en su módulo: el recortador (cropper.js),
+// la puntuación (puntuacion.js) y la galería (galeria-editor.js). Aquí sólo se
+// montan y se orquesta el guardado.
 
 import { el, formatPeso, toast } from './utils.js';
 import { api } from './api.js';
-import { LIMITS } from './state.js';
+import { pedirHashtags, subirImagen } from './acciones.js';
 import { createCropper } from './cropper.js';
-import { compressCrop, compressPhoto } from './compressor.js';
+import { compressCrop } from './compressor.js';
 import { createEditorPuntuacion } from './puntuacion.js';
+import { createEditorGaleria } from './galeria-editor.js';
+import { DESCRIPCION_MAX_LEN, TITULO_MAX_LEN } from './comun/reglas.js';
+import { parseHashtagsField } from './comun/tags.js';
 
 export function mountComposer({ root, id = null, onGuardada }) {
   const editando = !!id;
@@ -41,10 +48,15 @@ export function mountComposer({ root, id = null, onGuardada }) {
   const estado = el('p', { class: 'ayuda' });
 
   const titulo = el('input', {
-    attrs: { type: 'text', id: 'c-titulo', maxlength: '120', placeholder: 'título', required: '' },
+    attrs: {
+      type: 'text', id: 'c-titulo', maxlength: String(TITULO_MAX_LEN), placeholder: 'título', required: '',
+    },
   });
   const descripcion = el('textarea', {
-    attrs: { id: 'c-desc', maxlength: '2000', rows: '3', placeholder: 'qué llevaba, cómo salió, quién estaba…' },
+    attrs: {
+      id: 'c-desc', maxlength: String(DESCRIPCION_MAX_LEN), rows: '3',
+      placeholder: 'qué llevaba, cómo salió, quién estaba…',
+    },
   });
   const hashtags = el('input', {
     attrs: { type: 'text', id: 'c-tags', placeholder: '#leña #marisco #domingo' },
@@ -58,22 +70,12 @@ export function mountComposer({ root, id = null, onGuardada }) {
     el('label', { class: 'visually-hidden', text: texto, attrs: { for: campo.id } });
 
   const puntuacion = createEditorPuntuacion();
+  const galeria = createEditorGaleria();
 
   // El botón de la cenital va junto al recortador, no en la barra de abajo: es
   // el primer paso, no una acción de cierre.
   const filaFoto = el('div', { class: 'composer-foto' });
   filaFoto.append(btnFoto, estado);
-
-  // --- galería ---
-  const inputGaleria = el('input', {
-    // Sin `capture`: estas fotos suelen estar ya hechas en el carrete, no se
-    // hacen en el momento como la cenital.
-    attrs: { type: 'file', accept: 'image/*', multiple: '', hidden: '' },
-  });
-  const btnGaleria = el('button', { text: '+ fotos de la comida', attrs: { type: 'button' } });
-  const tiraGaleria = el('div', { class: 'galeria-editor' });
-  const filaGaleria = el('div', { class: 'composer-foto' });
-  filaGaleria.append(btnGaleria);
 
   // El formulario sigue el mismo orden que la ficha: título, la cenital, la
   // puntuación, la descripción, la galería y los hashtags.
@@ -83,7 +85,7 @@ export function mountComposer({ root, id = null, onGuardada }) {
     cropperRoot, inputFoto, filaFoto,
     puntuacion.nodo,
     etiquetar(descripcion, 'descripción'), descripcion,
-    tiraGaleria, inputGaleria, filaGaleria,
+    galeria.nodo,
     etiquetar(hashtags, 'hashtags'), hashtags, ayudaTags, sugerencias,
   );
 
@@ -101,13 +103,11 @@ export function mountComposer({ root, id = null, onGuardada }) {
 
   // --- estado ---
   let fotoElegida = false;
+  // La cenital ya subida a R2 ({ key, size, crop }). Se guarda para que, si
+  // falla lo que viene después y se reintenta, no se vuelva a subir la misma
+  // foto. Si entretanto se movió el encuadre, `crop` ya no casa y se sube otra.
+  let fotoSubida = null;
   let enviando = false;
-
-  // La galería. Cada entrada es o una foto ya subida ({ r2_key, width, height })
-  // o una pendiente ({ file, url }). Las pendientes se comprimen y se suben al
-  // publicar, no al elegirlas: así cancelar el formulario no deja objetos
-  // huérfanos en R2.
-  let galeria = [];
 
   function desplegar(abierto) {
     abrir.hidden = abierto;
@@ -131,54 +131,11 @@ export function mountComposer({ root, id = null, onGuardada }) {
     estado.textContent = '';
     btnFoto.textContent = 'hacer o elegir la foto';
     inputFoto.value = '';
-    inputGaleria.value = '';
     fotoElegida = false;
+    fotoSubida = null;
     puntuacion.set({});
-    for (const f of galeria) if (f.url) URL.revokeObjectURL(f.url);
-    galeria = [];
-    pintarGaleria();
+    galeria.limpiar();
     cropper.reset();
-  }
-
-  // --- galería ---
-
-  const MAX_FOTOS = 20; // el mismo tope que valida el servidor
-
-  btnGaleria.addEventListener('click', () => inputGaleria.click());
-
-  inputGaleria.addEventListener('change', () => {
-    const nuevas = [...(inputGaleria.files || [])].filter((f) => f.type.startsWith('image/'));
-    const hueco = MAX_FOTOS - galeria.length;
-    if (nuevas.length > hueco) {
-      toast(`caben ${MAX_FOTOS} fotos como mucho, me quedo con las primeras`, 'error');
-    }
-    for (const file of nuevas.slice(0, Math.max(0, hueco))) {
-      // URL local para la miniatura: se ve al instante, sin esperar a subirla.
-      galeria.push({ file, url: URL.createObjectURL(file) });
-    }
-    inputGaleria.value = '';
-    pintarGaleria();
-  });
-
-  function pintarGaleria() {
-    tiraGaleria.replaceChildren();
-    galeria.forEach((foto, i) => {
-      const item = el('div', { class: 'galeria-item' });
-      item.append(el('img', { attrs: { src: foto.url || `/r2/${foto.r2_key}`, alt: '' } }));
-      const quitar = el('button', {
-        class: 'galeria-quitar',
-        text: '×',
-        attrs: { type: 'button', 'aria-label': `quitar la foto ${i + 1}` },
-      });
-      quitar.addEventListener('click', () => {
-        const [fuera] = galeria.splice(i, 1);
-        if (fuera?.url) URL.revokeObjectURL(fuera.url);
-        pintarGaleria();
-      });
-      item.append(quitar);
-      tiraGaleria.append(item);
-    });
-    btnGaleria.textContent = galeria.length ? '+ más fotos' : '+ fotos de la comida';
   }
 
   // --- foto ---
@@ -192,6 +149,7 @@ export function mountComposer({ root, id = null, onGuardada }) {
     try {
       await cropper.load(file);
       fotoElegida = true;
+      fotoSubida = null;
       estado.textContent = 'arrastra y pellizca para colocar la paella dentro del círculo';
       btnFoto.textContent = 'cambiar la foto';
     } catch (err) {
@@ -202,22 +160,19 @@ export function mountComposer({ root, id = null, onGuardada }) {
   });
 
   // --- hashtags que ya existen ---
-  (async () => {
-    const { ok, data } = await api('/api/hashtags');
-    if (!ok || !Array.isArray(data) || data.length === 0) return;
-    for (const { tag } of data.slice(0, 20)) {
+  pedirHashtags().then((lista) => {
+    for (const { tag } of lista.slice(0, 20)) {
       const btn = el('button', { class: 'tag', text: `#${tag}`, attrs: { type: 'button' } });
       btn.addEventListener('click', () => alternarTag(tag));
       sugerencias.append(btn);
     }
-  })();
+  });
 
-  // Añade o quita el tag del campo, respetando lo que ya haya escrito.
+  // Añade o quita el tag del campo, respetando lo que ya haya escrito. Lee el
+  // campo con la misma función que el servidor, así que lo que se ve es lo que
+  // se guarda.
   function alternarTag(tag) {
-    const actuales = hashtags.value
-      .split(/[\s,]+/)
-      .map((t) => t.replace(/^#/, '').toLowerCase())
-      .filter(Boolean);
+    const actuales = parseHashtagsField(hashtags.value);
     const i = actuales.indexOf(tag);
     if (i >= 0) actuales.splice(i, 1);
     else actuales.push(tag);
@@ -233,12 +188,7 @@ export function mountComposer({ root, id = null, onGuardada }) {
       descripcion.value = data.descripcion || '';
       hashtags.value = (data.hashtags || []).map((t) => `#${t}`).join(' ');
       puntuacion.set(data);
-      galeria = (data.fotos || []).map((f) => ({
-        r2_key: f.r2_key,
-        width: f.width,
-        height: f.height,
-      }));
-      pintarGaleria();
+      galeria.set(data.fotos);
       cropper.showExisting(`/r2/${data.r2_key}`);
       btnFoto.textContent = 'cambiar la foto';
       estado.textContent = 'si no cambias la foto, se queda la que hay';
@@ -246,55 +196,19 @@ export function mountComposer({ root, id = null, onGuardada }) {
   }
 
   // --- guardar ---
-  async function subirFoto() {
+  const mismoRecorte = (a, b) =>
+    !!a && !!b && a.sx === b.sx && a.sy === b.sy && a.side === b.side;
+
+  async function subirCenital() {
     const crop = cropper.getCrop();
     const bitmap = cropper.getBitmap();
     if (!crop || !bitmap) return null;
 
     estado.textContent = 'preparando la foto…';
     const { blob, side } = await compressCrop(bitmap, crop);
-    if (blob.size > LIMITS.image) throw new Error('la foto comprimida sigue siendo demasiado grande');
-
     estado.textContent = `subiendo la foto (${formatPeso(blob.size)})…`;
-    const { ok, data } = await api('/api/upload', {
-      method: 'POST',
-      body: blob,
-      headers: { 'content-type': blob.type },
-    });
-    if (!ok) throw new Error(data?.error || 'no se pudo subir la foto');
-    return { key: data.key, size: side };
+    return { key: await subirImagen(blob), size: side, crop };
   }
-
-  // Comprime y sube las fotos pendientes, conservando el orden de la tira.
-  // Las que ya estaban subidas (al editar) pasan tal cual.
-  async function subirGaleria() {
-    const salida = [];
-    const pendientes = galeria.filter((f) => f.file).length;
-    let hechas = 0;
-
-    for (const foto of galeria) {
-      if (!foto.file) {
-        salida.push({ r2_key: foto.r2_key, width: foto.width, height: foto.height });
-        continue;
-      }
-      hechas++;
-      estado.textContent = `subiendo foto ${hechas} de ${pendientes}…`;
-      const { blob, width, height } = await compressPhoto(foto.file);
-      if (blob.size > LIMITS.image) throw new Error('una de las fotos es demasiado grande');
-      const { ok, data } = await api('/api/upload', {
-        method: 'POST',
-        body: blob,
-        headers: { 'content-type': blob.type },
-      });
-      if (!ok) throw new Error(data?.error || 'no se pudo subir una de las fotos');
-      salida.push({ r2_key: data.key, width, height });
-    }
-    return salida;
-  }
-
-  // Se devuelve para que quien monte el composer pueda desplegarlo (lo usa el
-  // atajo /?subir=1 de la app instalada).
-  const api_publica = { abrir: () => desplegar(true) };
 
   caja.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -308,17 +222,19 @@ export function mountComposer({ root, id = null, onGuardada }) {
     publicar.textContent = 'guardando…';
 
     try {
-      // Sólo se sube foto si hay una nueva recortada; al editar sin tocarla,
-      // esto devuelve null y el PATCH deja el r2_key anterior.
-      const foto = fotoElegida ? await subirFoto() : null;
-      const fotos = await subirGaleria();
+      // Sólo se sube foto si hay una nueva recortada; al editar sin tocarla no
+      // se manda r2_key y el PATCH deja la anterior.
+      if (fotoElegida && !mismoRecorte(fotoSubida?.crop, cropper.getCrop())) {
+        fotoSubida = await subirCenital();
+      }
+      const fotos = await galeria.subir((texto) => { estado.textContent = texto; });
       const body = {
         titulo: titulo.value,
         descripcion: descripcion.value,
         hashtags: hashtags.value,
         notas: puntuacion.get(),
         fotos,
-        ...(foto ? { r2_key: foto.key, size: foto.size } : {}),
+        ...(fotoSubida ? { r2_key: fotoSubida.key, size: fotoSubida.size } : {}),
       };
       const { ok, data } = editando
         ? await api(`/api/paellas/${id}`, { method: 'PATCH', body })
@@ -344,5 +260,7 @@ export function mountComposer({ root, id = null, onGuardada }) {
     }
   });
 
-  return api_publica;
+  // Se devuelve para que quien monte el composer pueda desplegarlo (lo usa el
+  // atajo /?subir=1 de la app instalada).
+  return { abrir: () => desplegar(true) };
 }

@@ -11,7 +11,17 @@
    azafrán. Y la columna, que allí va pegada a la izquierda, aquí va centrada.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* La tipografía se sirve desde aquí (public/vendor/, ver scripts/vendor.mjs) y
+   no desde Google Fonts: el @import de antes bloqueaba el pintado con dos
+   viajes a otro dominio, no funcionaba sin conexión y le pasaba a Google la IP
+   de cada visita. Es la versión variable: un solo archivo para todos los pesos. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/vendor/fonts/jetbrains-mono.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --papel: #faf6f0;

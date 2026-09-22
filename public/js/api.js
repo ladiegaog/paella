@@ -5,7 +5,9 @@
 // { ok: false, status: 0 }, así que quien llama no tiene que distinguir entre
 // "el servidor dijo que no" y "no se pudo enviar" — los dos acaban en un toast.
 
-import { CSRF_HEADERS } from './state.js';
+// Header CSRF: todo POST/PATCH/DELETE lo lleva. El worker
+// (src/middleware.ts → requireCsrf) exige exactamente este header con valor "1".
+const CSRF_HEADERS = { 'x-paella-csrf': '1' };
 
 const RAW_BODY_TYPES = [Blob, ArrayBuffer, FormData];
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validatePaellaBody } from "../src/index";
+import { validatePaellaBody } from "../../src/validate";
 
 const KEY_OK = "fotos/26/09/0123456789abcdef01234567.webp";
 

@@ -33,17 +33,33 @@ run_worker_first = true
 binding = "DB"
 database_name = "paella-db"
 database_id = "77c37c04-b567-4b98-9451-4084c2e5ed60"
+# Migraciones nativas de D1: `wrangler d1 migrations apply` aplica en orden las
+# que falten y apunta cuáles van en la tabla d1_migrations.
+migrations_dir = "migrations"
 
 [[r2_buckets]]
 binding = "STORAGE"
 bucket_name = "paella-storage"
 
-# Rate limiting nativo de Workers (sin KV ni recurso externo). Protege las
-# escrituras autenticadas (crear paellas, subir fotos) de un bucle accidental
-# que sature R2/D1. namespace_id es un id lógico que eliges tú; `period` sólo
-# admite 10 o 60 (segundos).
-[[unsafe.bindings]]
+# Rate limiting nativo de Workers (sin KV ni recurso externo). namespace_id es
+# un id lógico que eliges tú; `period` sólo admite 10 o 60 (segundos).
+#
+# WRITE_LIMITER protege las escrituras autenticadas (crear paellas, subir
+# fotos) de un bucle accidental que sature R2/D1.
+[[ratelimits]]
 name = "WRITE_LIMITER"
-type = "ratelimit"
 namespace_id = "3001"
 simple = { limit = 60, period = 60 }
+
+# LOGIN_LIMITER frena a quien pruebe contraseñas a ciegas: 10 intentos por
+# minuto y por IP sobran para quien se equivoca al teclear.
+[[ratelimits]]
+name = "LOGIN_LIMITER"
+namespace_id = "3002"
+simple = { limit = 10, period = 60 }
+
+# El id del despliegue. El Worker lo mete en /sw.js al servirlo, así que cada
+# deploy cambia el service worker y el navegador tira las cachés viejas solo,
+# sin tener que acordarse de subir una versión a mano.
+[version_metadata]
+binding = "CF_VERSION_METADATA"

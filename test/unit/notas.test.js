@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatNota, media, veredicto } from "../public/js/puntuacion.js";
+import { formatNota, media, veredicto } from "../../public/js/comun/notas.js";
 
 const notas = (a, b, c, d) => ({
   punto_arroz: a, sabor_caldo: b, socarrat: c, sinergia: d,

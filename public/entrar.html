@@ -12,6 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="paellas" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <link rel="stylesheet" href="/style.css" />
+  <link rel="preload" href="/vendor/fonts/jetbrains-mono.woff2" as="font" type="font/woff2" crossorigin />
   <script src="/js/pwa.js" defer></script>
   <title>entrar — paellas.party</title>
   <meta name="robots" content="noindex" />
@@ -35,10 +36,6 @@
     <p id="err" class="error-entrar" role="alert"></p>
     <a href="/" class="ayuda">volver</a>
   </main>
-  <script>
-    if (new URLSearchParams(location.search).get('e')) {
-      document.getElementById('err').textContent = 'usuario o contraseña incorrectos';
-    }
-  </script>
+  <script src="/js/page-entrar.js" defer></script>
 </body>
 </html>

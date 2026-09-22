@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractHashtags, parseHashtagsField } from "../src/hashtags";
+import { extractHashtags, parseHashtagsField } from "../../public/js/comun/tags.js";
 
 describe("extractHashtags", () => {
   it("saca los tags del texto, en minúsculas y sin repetir", () => {

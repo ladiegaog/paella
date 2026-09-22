@@ -61,8 +61,20 @@ function mover(paso) {
   pintar();
 }
 
+// Con el visor abierto el foco no puede salirse a la página de detrás (que ni
+// se ve): Tab da la vuelta entre sus botones.
+function atraparFoco(e) {
+  const botones = [...visor.raiz.querySelectorAll('button')].filter((b) => !b.hidden);
+  if (botones.length === 0) return;
+  const i = botones.indexOf(document.activeElement);
+  const siguiente = e.shiftKey ? (i <= 0 ? botones.length - 1 : i - 1) : (i + 1) % botones.length;
+  e.preventDefault();
+  botones[siguiente].focus();
+}
+
 function alPulsarTecla(e) {
-  if (e.key === 'Escape') cerrarVisor();
+  if (e.key === 'Tab') atraparFoco(e);
+  else if (e.key === 'Escape') cerrarVisor();
   else if (e.key === 'ArrowLeft') mover(-1);
   else if (e.key === 'ArrowRight') mover(1);
 }
