@@ -16,6 +16,14 @@ CREATE TABLE IF NOT EXISTS paellas (
     r2_key TEXT NOT NULL,
     -- Lado del cuadrado en píxeles (la imagen siempre es cuadrada).
     size INTEGER,
+    -- Puntuación desglosada, del 0 al 10. NULL = sin puntuar (los cuatro van
+    -- juntos: o se puntúa la paella o no). La nota global NO se guarda: es la
+    -- media de estos cuatro, y calcularla al vuelo evita que se quede
+    -- desincronizada si se edita una parte.
+    punto_arroz INTEGER,
+    sabor_caldo INTEGER,
+    socarrat INTEGER,
+    sinergia INTEGER,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     -- edited_at: NULL = nunca editada.
     edited_at TEXT,
@@ -31,6 +39,19 @@ CREATE TABLE IF NOT EXISTS hashtags (
     FOREIGN KEY (paella_id) REFERENCES paellas(id) ON DELETE CASCADE
 );
 
+-- Fotos de la galería. NO incluye la cenital circular, que vive en
+-- paellas.r2_key: esa es la portada y siempre hay exactamente una.
+CREATE TABLE IF NOT EXISTS fotos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    paella_id INTEGER NOT NULL,
+    r2_key TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (paella_id) REFERENCES paellas(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_paellas_created ON paellas(created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_paellas_deleted ON paellas(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_hashtags_tag ON hashtags(tag);
+CREATE INDEX IF NOT EXISTS idx_fotos_paella ON fotos(paella_id, position);

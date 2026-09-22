@@ -12,7 +12,9 @@
     "db:create": "wrangler d1 create paella-db",
     "db:migrate": "wrangler d1 execute paella-db --local --file=schema.sql",
     "db:migrate:remote": "wrangler d1 execute paella-db --remote --file=schema.sql",
-    "r2:create": "wrangler r2 bucket create paella-storage"
+    "r2:create": "wrangler r2 bucket create paella-storage",
+    "db:migrate:0001": "wrangler d1 execute paella-db --local --file=migrations/0001-puntuacion-y-galeria.sql",
+    "db:migrate:0001:remote": "wrangler d1 execute paella-db --remote --file=migrations/0001-puntuacion-y-galeria.sql"
   },
   "dependencies": {
     "hono": "^4.6.0"

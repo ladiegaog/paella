@@ -25,7 +25,8 @@
 import { outputSide } from './geom.js';
 
 const QUALITY = 85;        // 0..100 para jsquash (toBlob usa 0..1)
-export const TARGET_SIDE = 1200;
+export const TARGET_SIDE = 1200;   // lado de la cenital circular (cuadrada)
+const GALERIA_MAX = 1600;          // lado largo de las fotos de galería
 
 const BASE = 'https://cdn.jsdelivr.net/npm/@jsquash/webp@1.5.0';
 // Versión NO-SIMD: un único .wasm que funciona en todos los navegadores sin
@@ -87,6 +88,41 @@ function canvasToBlob(canvas, type, quality) {
   });
 }
 
+// Codifica a WebP lo que haya en el lienzo. Camino principal: el encoder WASM.
+// Si no carga (red caída, CDN bloqueado) cae a canvas.toBlob, que en escritorio
+// da WebP igual y en iOS da PNG — mejor subir algo que fallar.
+async function aWebp(canvas, ctx, w, h) {
+  try {
+    const encode = await loadWebpEncoder();
+    const buffer = await encode(ctx.getImageData(0, 0, w, h), QUALITY);
+    if (!buffer || !buffer.byteLength) throw new Error('encode vacío');
+    return new Blob([buffer], { type: 'image/webp' });
+  } catch (err) {
+    console.warn('encoder webp wasm no disponible, usando canvas.toBlob', err);
+    return canvasToBlob(canvas, 'image/webp', QUALITY / 100);
+  }
+}
+
+// Foto de galería: sin recorte, sólo reescalada para que el lado largo no pase
+// de GALERIA_MAX, y a WebP. Mantiene la proporción original (una foto de la
+// mesa es apaisada, una del cocinero es vertical, y las dos valen).
+export async function compressPhoto(file) {
+  const bitmap = await decodeFile(file);
+  const escala = Math.min(1, GALERIA_MAX / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * escala));
+  const h = Math.max(1, Math.round(bitmap.height * escala));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+
+  return { blob: await aWebp(canvas, ctx, w, h), width: w, height: h };
+}
+
 // Recorta el cuadrado { sx, sy, side } del bitmap y lo codifica a WebP.
 // Devuelve { blob, side }.
 export async function compressCrop(bitmap, crop) {
@@ -99,16 +135,5 @@ export async function compressCrop(bitmap, crop) {
   // drawImage de 9 argumentos: toma (sx, sy, side, side) del bitmap y lo lleva
   // a (0, 0, out, out) del lienzo.
   ctx.drawImage(bitmap, crop.sx, crop.sy, crop.side, crop.side, 0, 0, out, out);
-
-  try {
-    const encode = await loadWebpEncoder();
-    const imageData = ctx.getImageData(0, 0, out, out);
-    const buffer = await encode(imageData, QUALITY);
-    if (!buffer || !buffer.byteLength) throw new Error('encode vacío');
-    return { blob: new Blob([buffer], { type: 'image/webp' }), side: out };
-  } catch (err) {
-    console.warn('encoder webp wasm no disponible, usando canvas.toBlob', err);
-    const blob = await canvasToBlob(canvas, 'image/webp', QUALITY / 100);
-    return { blob, side: out };
-  }
+  return { blob: await aWebp(canvas, ctx, out, out), side: out };
 }

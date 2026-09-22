@@ -6,14 +6,35 @@ export interface PaellaRow {
   descripcion: string | null;
   r2_key: string;
   size: number | null;
+  // Puntuación desglosada, 0–10. NULL = sin puntuar. La nota global no se
+  // guarda: es la media de estas cuatro y se calcula donde se pinta.
+  punto_arroz: number | null;
+  sabor_caldo: number | null;
+  socarrat: number | null;
+  sinergia: number | null;
   created_at: string;
   edited_at?: string | null;
   deleted_at?: string | null;
 }
 
+export interface FotoRow {
+  id: number;
+  paella_id: number;
+  r2_key: string;
+  width: number | null;
+  height: number | null;
+  position: number;
+}
+
 export interface Paella extends PaellaRow {
   hashtags: string[];
+  fotos: FotoRow[];
 }
+
+// Las cuatro notas, en el orden en que se enseñan.
+export const CRITERIOS = ["punto_arroz", "sabor_caldo", "socarrat", "sinergia"] as const;
+export type Criterio = (typeof CRITERIOS)[number];
+export type Notas = Record<Criterio, number | null>;
 
 // D1 limita los parámetros vinculados por query (~100). Cualquier lista de ids
 // en un `IN (?,?,…)` hay que trocearla por debajo de ese tope.
@@ -25,29 +46,59 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-// Carga los hashtags de un lote de paellas en una query por lote (no una por
-// paella) y los pega a cada fila.
-async function attachTags(db: D1Database, rows: PaellaRow[]): Promise<Paella[]> {
-  if (rows.length === 0) return [];
-  const ids = rows.map((r) => r.id);
-  const batches = chunk(ids, D1_MAX_BIND);
+// Trae de golpe una relación (hashtags, fotos…) de un lote de paellas: una
+// query por lote en vez de una por paella.
+async function selectByPaellaIds<T>(
+  db: D1Database,
+  ids: number[],
+  sqlFor: (placeholders: string) => string,
+): Promise<T[]> {
+  if (ids.length === 0) return [];
   const res = await Promise.all(
-    batches.map((b) =>
-      db
-        .prepare(
-          `SELECT paella_id, tag FROM hashtags WHERE paella_id IN (${b.map(() => "?").join(",")}) ORDER BY tag`,
-        )
-        .bind(...b)
-        .all<{ paella_id: number; tag: string }>(),
+    chunk(ids, D1_MAX_BIND).map((b) =>
+      db.prepare(sqlFor(b.map(() => "?").join(","))).bind(...b).all<T>(),
     ),
   );
-  const byId = new Map<number, string[]>();
-  for (const { paella_id, tag } of res.flatMap((r) => r.results)) {
-    const arr = byId.get(paella_id) || [];
-    arr.push(tag);
-    byId.set(paella_id, arr);
+  return res.flatMap((r) => r.results);
+}
+
+function agrupar<T extends { paella_id: number }>(filas: T[]): Map<number, T[]> {
+  const m = new Map<number, T[]>();
+  for (const fila of filas) {
+    const arr = m.get(fila.paella_id) || [];
+    arr.push(fila);
+    m.set(fila.paella_id, arr);
   }
-  return rows.map((r) => ({ ...r, hashtags: byId.get(r.id) || [] }));
+  return m;
+}
+
+// Carga hashtags y fotos de galería de un lote de paellas (dos queries en
+// total, no dos por paella) y se los pega a cada fila.
+async function attachExtras(db: D1Database, rows: PaellaRow[]): Promise<Paella[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+
+  const [tagRows, fotoRows] = await Promise.all([
+    selectByPaellaIds<{ paella_id: number; tag: string }>(
+      db,
+      ids,
+      (ph) => `SELECT paella_id, tag FROM hashtags WHERE paella_id IN (${ph}) ORDER BY tag`,
+    ),
+    selectByPaellaIds<FotoRow>(
+      db,
+      ids,
+      (ph) => `SELECT * FROM fotos WHERE paella_id IN (${ph}) ORDER BY paella_id, position, id`,
+    ),
+  ]);
+
+  const tagsPorId = agrupar(tagRows);
+  const fotosPorId = agrupar(fotoRows);
+
+  return rows.map((r) => ({
+    ...r,
+    hashtags: (tagsPorId.get(r.id) || []).map((t) => t.tag),
+    fotos: fotosPorId.get(r.id) || [],
+  }));
 }
 
 // ---------- lecturas ----------
@@ -97,7 +148,7 @@ export async function listPaellas(
   const page = hasMore ? rows.slice(0, limit) : rows;
   if (page.length === 0) return { paellas: [], nextCursor: null };
 
-  const paellas = await attachTags(db, page);
+  const paellas = await attachExtras(db, page);
   const last = page[page.length - 1];
   return {
     paellas,
@@ -111,8 +162,8 @@ export async function getPaella(db: D1Database, id: number): Promise<Paella | nu
     .bind(id)
     .first<PaellaRow>();
   if (!row) return null;
-  const [withTags] = await attachTags(db, [row]);
-  return withTags;
+  const [conExtras] = await attachExtras(db, [row]);
+  return conExtras;
 }
 
 export async function listHashtags(
@@ -138,14 +189,21 @@ export async function createPaella(
     descripcion: string | null;
     r2_key: string;
     size: number | null;
+    notas: Notas;
   },
 ): Promise<PaellaRow> {
   const row = await db
     .prepare(
-      `INSERT INTO paellas (titulo, descripcion, r2_key, size, created_at)
-       VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`,
+      `INSERT INTO paellas (titulo, descripcion, r2_key, size, punto_arroz, sabor_caldo, socarrat, sinergia, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) RETURNING *`,
     )
-    .bind(fields.titulo, fields.descripcion, fields.r2_key, fields.size)
+    .bind(
+      fields.titulo,
+      fields.descripcion,
+      fields.r2_key,
+      fields.size,
+      ...CRITERIOS.map((c) => fields.notas[c]),
+    )
     .first<PaellaRow>();
   return row!;
 }
@@ -159,12 +217,17 @@ export async function updatePaella(
   fields: {
     titulo: string;
     descripcion: string | null;
+    notas: Notas;
     r2_key?: string | null;
     size?: number | null;
   },
 ): Promise<boolean> {
   const sets = ["titulo = ?", "descripcion = ?"];
   const args: unknown[] = [fields.titulo, fields.descripcion];
+  for (const c of CRITERIOS) {
+    sets.push(`${c} = ?`);
+    args.push(fields.notas[c]);
+  }
   if (fields.r2_key) {
     sets.push("r2_key = ?", "size = ?");
     args.push(fields.r2_key, fields.size ?? null);
@@ -190,14 +253,36 @@ export async function deletePaella(db: D1Database, id: number): Promise<boolean>
   return (res.meta.changes ?? 0) > 0;
 }
 
+// Fija el conjunto exacto de fotos de galería de una paella: borra las filas
+// anteriores y reinserta en el orden recibido. Los objetos de R2 que salen NO
+// se borran del bucket — mismo criterio conservador que el borrado de paellas,
+// para que un cambio por error se pueda deshacer.
+export async function setFotos(
+  db: D1Database,
+  paellaId: number,
+  items: Array<{ r2_key: string; width: number | null; height: number | null }>,
+) {
+  await db.prepare("DELETE FROM fotos WHERE paella_id = ?").bind(paellaId).run();
+  if (items.length === 0) return;
+  const stmt = db.prepare(
+    "INSERT INTO fotos (paella_id, r2_key, width, height, position) VALUES (?, ?, ?, ?, ?)",
+  );
+  await db.batch(items.map((f, i) => stmt.bind(paellaId, f.r2_key, f.width, f.height, i)));
+}
+
 // ---------- export ----------
 
 export async function exportAll(db: D1Database) {
-  const [paellas, hashtags] = await Promise.all([
+  const [paellas, hashtags, fotos] = await Promise.all([
     db.prepare("SELECT * FROM paellas WHERE deleted_at IS NULL ORDER BY id").all(),
     db
       .prepare(
         "SELECT * FROM hashtags WHERE paella_id IN (SELECT id FROM paellas WHERE deleted_at IS NULL) ORDER BY paella_id, tag",
+      )
+      .all(),
+    db
+      .prepare(
+        "SELECT * FROM fotos WHERE paella_id IN (SELECT id FROM paellas WHERE deleted_at IS NULL) ORDER BY paella_id, position",
       )
       .all(),
   ]);
@@ -205,5 +290,6 @@ export async function exportAll(db: D1Database) {
     exported_at: new Date().toISOString(),
     paellas: paellas.results,
     hashtags: hashtags.results,
+    fotos: fotos.results,
   };
 }

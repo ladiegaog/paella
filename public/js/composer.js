@@ -12,7 +12,8 @@ import { el, formatPeso, toast } from './utils.js';
 import { api } from './api.js';
 import { LIMITS } from './state.js';
 import { createCropper } from './cropper.js';
-import { compressCrop } from './compressor.js';
+import { compressCrop, compressPhoto } from './compressor.js';
+import { createEditorPuntuacion } from './puntuacion.js';
 
 export function mountComposer({ root, id = null, onGuardada }) {
   const editando = !!id;
@@ -39,7 +40,6 @@ export function mountComposer({ root, id = null, onGuardada }) {
   const btnFoto = el('button', { text: 'hacer o elegir la foto', attrs: { type: 'button' } });
   const estado = el('p', { class: 'ayuda' });
 
-  const campos = el('div', { class: 'composer-campos' });
   const titulo = el('input', {
     attrs: { type: 'text', id: 'c-titulo', maxlength: '120', placeholder: 'título', required: '' },
   });
@@ -54,16 +54,38 @@ export function mountComposer({ root, id = null, onGuardada }) {
     class: 'ayuda',
     text: 'separados por espacios · los que escribas en el título o la descripción también cuentan',
   });
-  for (const [campo, etiqueta] of [[titulo, 'título'], [descripcion, 'descripción'], [hashtags, 'hashtags']]) {
-    const label = el('label', { class: 'visually-hidden', text: etiqueta, attrs: { for: campo.id } });
-    campos.append(label, campo);
-  }
-  campos.append(ayudaTags, sugerencias);
+  const etiquetar = (campo, texto) =>
+    el('label', { class: 'visually-hidden', text: texto, attrs: { for: campo.id } });
 
-  // El botón de la foto va junto al recortador, no en la barra de abajo: es
+  const puntuacion = createEditorPuntuacion();
+
+  // El botón de la cenital va junto al recortador, no en la barra de abajo: es
   // el primer paso, no una acción de cierre.
   const filaFoto = el('div', { class: 'composer-foto' });
   filaFoto.append(btnFoto, estado);
+
+  // --- galería ---
+  const inputGaleria = el('input', {
+    // Sin `capture`: estas fotos suelen estar ya hechas en el carrete, no se
+    // hacen en el momento como la cenital.
+    attrs: { type: 'file', accept: 'image/*', multiple: '', hidden: '' },
+  });
+  const btnGaleria = el('button', { text: '+ fotos de la comida', attrs: { type: 'button' } });
+  const tiraGaleria = el('div', { class: 'galeria-editor' });
+  const filaGaleria = el('div', { class: 'composer-foto' });
+  filaGaleria.append(btnGaleria);
+
+  // El formulario sigue el mismo orden que la ficha: título, la cenital, la
+  // puntuación, la descripción, la galería y los hashtags.
+  const campos = el('div', { class: 'composer-campos' });
+  campos.append(
+    etiquetar(titulo, 'título'), titulo,
+    cropperRoot, inputFoto, filaFoto,
+    puntuacion.nodo,
+    etiquetar(descripcion, 'descripción'), descripcion,
+    tiraGaleria, inputGaleria, filaGaleria,
+    etiquetar(hashtags, 'hashtags'), hashtags, ayudaTags, sugerencias,
+  );
 
   const cancelar = el('button', { text: 'cancelar', attrs: { type: 'button' } });
   const publicar = el('button', {
@@ -74,12 +96,18 @@ export function mountComposer({ root, id = null, onGuardada }) {
   const bar = el('div', { class: 'composer-bar' });
   bar.append(cancelar, publicar);
 
-  caja.append(cropperRoot, inputFoto, filaFoto, campos, bar);
+  caja.append(campos, bar);
   root.append(abrir, caja);
 
   // --- estado ---
   let fotoElegida = false;
   let enviando = false;
+
+  // La galería. Cada entrada es o una foto ya subida ({ r2_key, width, height })
+  // o una pendiente ({ file, url }). Las pendientes se comprimen y se suben al
+  // publicar, no al elegirlas: así cancelar el formulario no deja objetos
+  // huérfanos en R2.
+  let galeria = [];
 
   function desplegar(abierto) {
     abrir.hidden = abierto;
@@ -103,8 +131,54 @@ export function mountComposer({ root, id = null, onGuardada }) {
     estado.textContent = '';
     btnFoto.textContent = 'hacer o elegir la foto';
     inputFoto.value = '';
+    inputGaleria.value = '';
     fotoElegida = false;
+    puntuacion.set({});
+    for (const f of galeria) if (f.url) URL.revokeObjectURL(f.url);
+    galeria = [];
+    pintarGaleria();
     cropper.reset();
+  }
+
+  // --- galería ---
+
+  const MAX_FOTOS = 20; // el mismo tope que valida el servidor
+
+  btnGaleria.addEventListener('click', () => inputGaleria.click());
+
+  inputGaleria.addEventListener('change', () => {
+    const nuevas = [...(inputGaleria.files || [])].filter((f) => f.type.startsWith('image/'));
+    const hueco = MAX_FOTOS - galeria.length;
+    if (nuevas.length > hueco) {
+      toast(`caben ${MAX_FOTOS} fotos como mucho, me quedo con las primeras`, 'error');
+    }
+    for (const file of nuevas.slice(0, Math.max(0, hueco))) {
+      // URL local para la miniatura: se ve al instante, sin esperar a subirla.
+      galeria.push({ file, url: URL.createObjectURL(file) });
+    }
+    inputGaleria.value = '';
+    pintarGaleria();
+  });
+
+  function pintarGaleria() {
+    tiraGaleria.replaceChildren();
+    galeria.forEach((foto, i) => {
+      const item = el('div', { class: 'galeria-item' });
+      item.append(el('img', { attrs: { src: foto.url || `/r2/${foto.r2_key}`, alt: '' } }));
+      const quitar = el('button', {
+        class: 'galeria-quitar',
+        text: '×',
+        attrs: { type: 'button', 'aria-label': `quitar la foto ${i + 1}` },
+      });
+      quitar.addEventListener('click', () => {
+        const [fuera] = galeria.splice(i, 1);
+        if (fuera?.url) URL.revokeObjectURL(fuera.url);
+        pintarGaleria();
+      });
+      item.append(quitar);
+      tiraGaleria.append(item);
+    });
+    btnGaleria.textContent = galeria.length ? '+ más fotos' : '+ fotos de la comida';
   }
 
   // --- foto ---
@@ -158,6 +232,13 @@ export function mountComposer({ root, id = null, onGuardada }) {
       titulo.value = data.titulo;
       descripcion.value = data.descripcion || '';
       hashtags.value = (data.hashtags || []).map((t) => `#${t}`).join(' ');
+      puntuacion.set(data);
+      galeria = (data.fotos || []).map((f) => ({
+        r2_key: f.r2_key,
+        width: f.width,
+        height: f.height,
+      }));
+      pintarGaleria();
       cropper.showExisting(`/r2/${data.r2_key}`);
       btnFoto.textContent = 'cambiar la foto';
       estado.textContent = 'si no cambias la foto, se queda la que hay';
@@ -184,6 +265,33 @@ export function mountComposer({ root, id = null, onGuardada }) {
     return { key: data.key, size: side };
   }
 
+  // Comprime y sube las fotos pendientes, conservando el orden de la tira.
+  // Las que ya estaban subidas (al editar) pasan tal cual.
+  async function subirGaleria() {
+    const salida = [];
+    const pendientes = galeria.filter((f) => f.file).length;
+    let hechas = 0;
+
+    for (const foto of galeria) {
+      if (!foto.file) {
+        salida.push({ r2_key: foto.r2_key, width: foto.width, height: foto.height });
+        continue;
+      }
+      hechas++;
+      estado.textContent = `subiendo foto ${hechas} de ${pendientes}…`;
+      const { blob, width, height } = await compressPhoto(foto.file);
+      if (blob.size > LIMITS.image) throw new Error('una de las fotos es demasiado grande');
+      const { ok, data } = await api('/api/upload', {
+        method: 'POST',
+        body: blob,
+        headers: { 'content-type': blob.type },
+      });
+      if (!ok) throw new Error(data?.error || 'no se pudo subir una de las fotos');
+      salida.push({ r2_key: data.key, width, height });
+    }
+    return salida;
+  }
+
   caja.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (enviando) return;
@@ -199,10 +307,13 @@ export function mountComposer({ root, id = null, onGuardada }) {
       // Sólo se sube foto si hay una nueva recortada; al editar sin tocarla,
       // esto devuelve null y el PATCH deja el r2_key anterior.
       const foto = fotoElegida ? await subirFoto() : null;
+      const fotos = await subirGaleria();
       const body = {
         titulo: titulo.value,
         descripcion: descripcion.value,
         hashtags: hashtags.value,
+        notas: puntuacion.get(),
+        fotos,
         ...(foto ? { r2_key: foto.key, size: foto.size } : {}),
       };
       const { ok, data } = editando

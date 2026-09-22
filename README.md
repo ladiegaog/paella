@@ -1,7 +1,8 @@
 # paellas.party
 
-Las paellas que va haciendo la diega. Cada paella es una foto cenital circular,
-un título, una descripción y unos hashtags con los que luego se filtra la lista.
+Las paellas que va haciendo la diega. Cada paella lleva un título, una foto
+cenital circular, una puntuación desglosada, una descripción, una galería de
+fotos de la comida y unos hashtags con los que luego se filtra la lista.
 
 - **Web:** https://paellas.party
 - **Repo:** https://github.com/ladiegaog/paella
@@ -18,7 +19,7 @@ No hay build ni framework de front — el HTML, el CSS y los módulos de JS de
 | Pieza | Qué hace |
 |---|---|
 | **Worker** (`src/`, [Hono](https://hono.dev)) | API, login y servir las fotos |
-| **D1** (`paella-db`) | Las paellas y sus hashtags (SQLite) |
+| **D1** (`paella-db`) | Las paellas, sus notas, sus hashtags y su galería (SQLite) |
 | **R2** (`paella-storage`) | Las fotos |
 | **Workers Assets** (`public/`) | HTML, CSS y JS estáticos |
 
@@ -36,6 +37,28 @@ Cloudflare. La sesión es una cookie firmada con HMAC que dura 60 días.
 Además de la contraseña, las escrituras llevan dos cerrojos más: un header
 `x-paella-csrf` que un formulario de otra web no puede poner, y un límite de
 60 escrituras por minuto y por IP.
+
+### La puntuación
+
+Cuatro notas del 0 al 10 —**punto del arroz**, **sabor del caldo**,
+**socarrat** y **sinergia**— y una nota global que es su media.
+
+La global **no se guarda**: se calcula al pintarla, en `puntuacion.js`. Guardarla
+sería tener el mismo dato en dos sitios, y en cuanto se editara una de las
+cuatro partes la global se quedaría mintiendo.
+
+Puntuar es opcional y por criterio: una paella puede no tener nota ninguna (no
+sale el bloque), o tener sólo el socarrat puntuado. **Sin nota no es lo mismo que
+un cero**, y esa distinción es más frágil de lo que parece: `Number(null)` vale
+`0` en JavaScript, así que un filtro descuidado convierte una paella sin puntuar
+en un cero redondo con su veredicto de "arroz caldoso". Hay un test para eso.
+
+El mismo dibujo sirve para leer y para puntuar: la fila de bolitas de la ficha es
+la misma que se arrastra en el formulario. Por dentro es un slider de once
+posiciones (el 0 incluido, que una paella puede salir fatal) con teclado y
+`role="slider"`.
+
+Y un veredicto en palabras por cada nota, que es la gracia de todo esto.
 
 ### La foto circular
 
@@ -65,6 +88,18 @@ Dos cosas que conviene no romper:
 
 La geometría del recorte vive aparte en `geom.js`, sin nada de DOM, y está
 cubierta por tests (`test/geom.test.js`).
+
+### La galería
+
+Aparte de la cenital, cada paella puede llevar hasta 20 fotos sueltas: la mesa,
+la gente, el socarrat de cerca. Estas **no** se recortan ni se redondean — son
+fotos normales, se reescalan a 1600 px de lado largo y se pasan a WebP con el
+mismo encoder. En la ficha salen en una tira que se desliza, y al pulsarlas se
+abren a pantalla completa (flechas, deslizar, Escape).
+
+Se suben **al publicar**, no al elegirlas: así cancelar el formulario no deja
+fotos huérfanas en R2. Mientras tanto la miniatura se ve al instante con una
+URL local.
 
 ---
 
@@ -129,6 +164,8 @@ npx wrangler r2 bucket create paella-storage
 
 # 4. Crear las tablas en la base de datos de producción
 npm run db:migrate:remote
+# (schema.sql ya trae todo: en una instalación nueva NO hay que aplicar nada
+#  de migrations/, que son los cambios para bases de datos que ya existían)
 
 # 5. Los secretos (los pide por teclado, no quedan en el historial)
 npx wrangler secret put PASSWORD       # la contraseña de la diega
@@ -151,6 +188,26 @@ los nameservers del dominio a los que indique Cloudflare.
 
 ---
 
+## Cambiar el esquema
+
+`schema.sql` es la foto del esquema **actual**: se aplica entero en una base de
+datos nueva y es idempotente. Los cambios sobre una base de datos que ya existe
+van en `migrations/`, numerados, y se aplican **una vez** cada uno:
+
+```bash
+npm run db:migrate:0001          # en local
+npm run db:migrate:0001:remote   # en producción
+```
+
+Al añadir una migración hay que tocar los dos sitios: el `ALTER TABLE` en
+`migrations/` y la forma final en `schema.sql`. Las migraciones no son
+idempotentes (SQLite no tiene `ADD COLUMN IF NOT EXISTS`), así que re-aplicar una
+da un error de columna duplicada: molesto, pero inofensivo.
+
+| Migración | Qué hizo |
+|---|---|
+| `0001-puntuacion-y-galeria.sql` | Las cuatro notas y la tabla `fotos` |
+
 ## Mantenimiento
 
 ### Cambiar la contraseña
@@ -170,8 +227,9 @@ Es la línea `USUARIO` en `[vars]` de `wrangler.toml`. Se cambia, se hace push.
 ### Sacar una copia de todo
 
 Con la sesión iniciada, en el navegador: **https://paellas.party/api/export**.
-Descarga un JSON con todas las paellas y sus hashtags. Las fotos no van dentro
-(son los archivos de R2), pero el JSON lleva la clave de cada una.
+Descarga un JSON con todas las paellas, sus notas, sus hashtags y su galería.
+Las fotos no van dentro (son los archivos de R2), pero el JSON lleva la clave de
+cada una.
 
 ### Recuperar una paella borrada
 
@@ -216,8 +274,10 @@ public/
   style.css      toda la hoja de estilo
   js/
     composer.js    el bloque de subir/editar
+    puntuacion.js  las cuatro notas, la media y el veredicto (leer y puntuar)
     cropper.js     arrastrar y pellizcar para encuadrar en el círculo
-    compressor.js  recorte → WebP (con el WASM de Squoosh)
+    compressor.js  recorte y reescalado → WebP (con el WASM de Squoosh)
+    visor.js       las fotos de la galería a pantalla completa
     geom.js        la matemática del recorte, sin DOM (con tests)
     feed.js        la lista: paginado, scroll infinito, filtro
     render.js      pintar una paella (el único sitio que toca datos de la base)
@@ -228,14 +288,16 @@ public/
     page-*.js      el arranque de cada página
 
 schema.sql       las tablas (se aplica entero, es idempotente)
+migrations/      los cambios de esquema sobre bases de datos que ya existían
 wrangler.toml    la configuración de Cloudflare
 ```
 
 ## Decisiones que igual sorprenden
 
-- **Sin carpeta `migrations/`:** `schema.sql` es `CREATE ... IF NOT EXISTS` de
-  arriba abajo, así que aplicarlo dos veces no rompe nada. Cuando el esquema
-  cambie de verdad, se añade la migración aparte.
+- **La nota global no se guarda:** es la media de las cuatro, calculada al
+  pintarla. Guardarla sería duplicar el dato y arriesgarse a que mienta.
+- **La galería se sube al publicar, no al elegir la foto:** cancelar el
+  formulario no deja nada tirado en R2.
 - **`run_worker_first = true`** en `wrangler.toml` no es opcional: sin eso,
   Cloudflare sirve los archivos de `public/` sin pasar por el Worker, y `/subir`
   se vería sin haber entrado.

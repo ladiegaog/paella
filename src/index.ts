@@ -8,14 +8,17 @@ import {
   timingSafeEqual,
 } from "./auth";
 import {
+  CRITERIOS,
   createPaella,
   deletePaella,
   exportAll,
   getPaella,
   listHashtags,
   listPaellas,
+  setFotos,
   updatePaella,
 } from "./db";
+import type { Notas } from "./db";
 import { extractHashtags, parseHashtagsField, setHashtags } from "./hashtags";
 import { buildMediaKey, extForContentType, isSafeMediaKey, maxImageBytes } from "./media";
 
@@ -23,6 +26,9 @@ import { buildMediaKey, extForContentType, isSafeMediaKey, maxImageBytes } from 
 
 const TITULO_MAX_LEN = 120;
 const DESCRIPCION_MAX_LEN = 2000;
+// Tope de fotos de galería por paella. Suficiente para contar la comida entera
+// sin que una sola paella pueda llenar el bucket.
+const MAX_FOTOS = 20;
 
 // Parsea un :id de ruta a entero positivo estricto. null si no es válido.
 function parseId(raw: string | undefined): number | null {
@@ -138,13 +144,19 @@ app.get("/api/hashtags", async (c) => c.json(await listHashtags(c.env.DB)));
 
 // ---------- API: escrituras (con login) ----------
 
+type FotoEntrada = { r2_key?: string | null; width?: number | null; height?: number | null };
+
 type PaellaBody = {
   titulo?: string | null;
   descripcion?: string | null;
   hashtags?: string | null;
   r2_key?: string | null;
   size?: number | null;
+  notas?: Record<string, unknown> | null;
+  fotos?: FotoEntrada[] | null;
 };
+
+type FotoValidada = { r2_key: string; width: number | null; height: number | null };
 
 type Validation =
   | { ok: false; error: string }
@@ -155,7 +167,22 @@ type Validation =
       tags: string[];
       r2_key: string | null;
       size: number | null;
+      notas: Notas;
+      // null = el body no traía `fotos`, así que la galería se deja como está
+      // (al editar sólo el título no hace falta reenviar las fotos). Un array
+      // vacío sí es "quítalas todas".
+      fotos: FotoValidada[] | null;
     };
+
+// Una nota válida es un entero de 0 a 10, o nada (sin puntuar). Cualquier otra
+// cosa —un 11, un decimal, un texto— se rechaza en vez de recortarse en
+// silencio: si el cliente manda basura es un fallo, no una preferencia.
+function parseNota(raw: unknown): number | null | undefined {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 10) return undefined; // inválida
+  return n;
+}
 
 // Valida y sanea el body. Los tags salen del campo dedicado MÁS los #embebidos
 // en título y descripción, para que escribir "#leña" en el texto también filtre.
@@ -176,6 +203,34 @@ export function validatePaellaBody(body: PaellaBody, requireFoto: boolean): Vali
   const sizeNum = Number(body.size);
   const size = Number.isSafeInteger(sizeNum) && sizeNum > 0 ? sizeNum : null;
 
+  const notas = {} as Notas;
+  for (const criterio of CRITERIOS) {
+    const nota = parseNota(body.notas?.[criterio]);
+    if (nota === undefined) {
+      return { ok: false, error: `la nota de ${criterio} tiene que ser del 0 al 10` };
+    }
+    notas[criterio] = nota;
+  }
+
+  let fotos: FotoValidada[] | null = null;
+  if (Array.isArray(body.fotos)) {
+    if (body.fotos.length > MAX_FOTOS) {
+      return { ok: false, error: `como mucho ${MAX_FOTOS} fotos en la galería` };
+    }
+    fotos = [];
+    for (const f of body.fotos) {
+      const key = f?.r2_key ? String(f.r2_key) : "";
+      if (!isSafeMediaKey(key)) return { ok: false, error: "foto de galería inválida" };
+      const w = Number(f?.width);
+      const h = Number(f?.height);
+      fotos.push({
+        r2_key: key,
+        width: Number.isSafeInteger(w) && w > 0 ? w : null,
+        height: Number.isSafeInteger(h) && h > 0 ? h : null,
+      });
+    }
+  }
+
   const tags = [
     ...new Set([
       ...parseHashtagsField(body.hashtags),
@@ -184,7 +239,7 @@ export function validatePaellaBody(body: PaellaBody, requireFoto: boolean): Vali
     ]),
   ];
 
-  return { ok: true, titulo, descripcion, tags, r2_key: rawKey, size };
+  return { ok: true, titulo, descripcion, tags, r2_key: rawKey, size, notas, fotos };
 }
 
 app.post("/api/paellas", requireAuth(), requireCsrf(), rateLimit(), async (c) => {
@@ -202,8 +257,12 @@ app.post("/api/paellas", requireAuth(), requireCsrf(), rateLimit(), async (c) =>
     descripcion: v.descripcion,
     r2_key: v.r2_key!,
     size: v.size,
+    notas: v.notas,
   });
-  await setHashtags(c.env.DB, row.id, v.tags);
+  await Promise.all([
+    setHashtags(c.env.DB, row.id, v.tags),
+    setFotos(c.env.DB, row.id, v.fotos ?? []),
+  ]);
   return c.json(await getPaella(c.env.DB, row.id), 201);
 });
 
@@ -222,11 +281,14 @@ app.patch("/api/paellas/:id", requireAuth(), requireCsrf(), rateLimit(), async (
   const updated = await updatePaella(c.env.DB, id, {
     titulo: v.titulo,
     descripcion: v.descripcion,
+    notas: v.notas,
     r2_key: v.r2_key,
     size: v.size,
   });
   if (!updated) return c.json({ error: "no encontrada" }, 404);
   await setHashtags(c.env.DB, id, v.tags);
+  // Sólo se tocan las fotos si el body las trae; si no, se quedan como estaban.
+  if (v.fotos) await setFotos(c.env.DB, id, v.fotos);
   return c.json(await getPaella(c.env.DB, id));
 });
 

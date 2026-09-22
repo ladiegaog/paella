@@ -1,11 +1,16 @@
 // ----- pintado de una paella -----
 //
+// El orden es: título, la cenital circular, la puntuación, la descripción, la
+// galería y los hashtags. La meta (fecha, editar, borrar) cierra la tarjeta.
+//
 // Todo el texto entra por textContent (via el()), así que una descripción con
 // "<script>" se ve como texto y no se ejecuta. No hay ni un innerHTML en este
 // archivo a propósito: es el único sitio donde se construyen nodos con datos
 // que vienen de la base.
 
 import { el, formatFecha } from './utils.js';
+import { renderPuntuacion } from './puntuacion.js';
+import { abrirVisor } from './visor.js';
 
 // Recorre el texto con una regex en vez de partir por espacios para no perder
 // los saltos de línea ni la puntuación pegada al tag ("#arroz,").
@@ -26,13 +31,53 @@ function textoConTags(texto, onTag) {
   return frag;
 }
 
+// La galería: las fotos sueltas, en una tira. Al pulsar una se abre el visor.
+function renderGaleria(paella) {
+  const fotos = paella.fotos || [];
+  if (fotos.length === 0) return null;
+
+  const tira = el('div', { class: 'galeria' });
+  fotos.forEach((foto, i) => {
+    const btn = el('button', {
+      class: 'galeria-foto',
+      attrs: { type: 'button', 'aria-label': `ver la foto ${i + 1} de ${fotos.length}` },
+    });
+    btn.append(
+      el('img', {
+        attrs: {
+          src: `/r2/${foto.r2_key}`,
+          alt: `foto ${i + 1} de ${paella.titulo}`,
+          loading: 'lazy',
+          decoding: 'async',
+          width: String(foto.width || 1600),
+          height: String(foto.height || 1600),
+        },
+      }),
+    );
+    btn.addEventListener('click', () => abrirVisor(fotos, i, paella.titulo));
+    tira.append(btn);
+  });
+  return tira;
+}
+
 export function renderPaella(paella, opts = {}) {
   const { onTag, onBorrar, authed = false, comoDetalle = false } = opts;
 
   const card = el('article', { class: comoDetalle ? 'paella paella-detalle' : 'paella' });
   card.dataset.id = String(paella.id);
 
-  // --- la foto, circular ---
+  // --- 1. el título ---
+  const h = el(comoDetalle ? 'h1' : 'h2', { class: 'paella-titulo' });
+  if (comoDetalle) {
+    h.append(textoConTags(paella.titulo, onTag));
+  } else {
+    const a = el('a', { attrs: { href: `/p/${paella.id}` } });
+    a.append(textoConTags(paella.titulo, onTag));
+    h.append(a);
+  }
+  card.append(h);
+
+  // --- 2. la cenital, circular ---
   const img = el('img', {
     attrs: {
       src: `/r2/${paella.r2_key}`,
@@ -49,26 +94,26 @@ export function renderPaella(paella, opts = {}) {
     ? el('div', { class: 'paella-foto' })
     : el('a', { class: 'paella-foto', attrs: { href: `/p/${paella.id}` } });
   foto.append(img);
+  card.append(foto);
 
-  // --- el título ---
-  const h = el(comoDetalle ? 'h1' : 'h2', { class: 'paella-titulo' });
-  if (comoDetalle) {
-    h.append(textoConTags(paella.titulo, onTag));
-  } else {
-    const a = el('a', { attrs: { href: `/p/${paella.id}` } });
-    a.append(textoConTags(paella.titulo, onTag));
-    h.append(a);
-  }
-  card.append(foto, h);
+  // --- 3. la puntuación ---
+  const puntuacion = renderPuntuacion(paella);
+  if (puntuacion) card.append(puntuacion);
 
+  // --- 4. la descripción ---
   if (paella.descripcion) {
     const p = el('p', { class: 'paella-desc' });
     p.append(textoConTags(paella.descripcion, onTag));
     card.append(p);
   }
 
-  // Sólo los tags que NO aparecen ya escritos en el texto, para no repetirlos
-  // dos veces en la misma tarjeta.
+  // --- 5. la galería ---
+  const galeria = renderGaleria(paella);
+  if (galeria) card.append(galeria);
+
+  // --- 6. los hashtags ---
+  // Sólo los que NO aparecen ya escritos en el texto, para no repetirlos dos
+  // veces en la misma tarjeta.
   const enTexto = new Set(
     [...`${paella.titulo} ${paella.descripcion || ''}`.matchAll(TAG_RE)].map((m) => m[1].toLowerCase()),
   );
